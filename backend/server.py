@@ -14,22 +14,16 @@ import bcrypt
 import jwt
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request, Response
 from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field, EmailStr
+from supabase import create_client
 
 
 # -------------------- Config --------------------
-MONGO_URL = os.environ["MONGO_URL"]
-DB_NAME = os.environ["DB_NAME"]
-JWT_SECRET = os.environ.get("JWT_SECRET", "hatchkod-dev-secret-change-me")
-JWT_ALGORITHM = "HS256"
-ACCESS_TOKEN_MIN = 60 * 24 * 7  # 7 days for simplicity in MVP
 
-ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@hatchkod.com")
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123")
+SUPABASE_URL = os.getenv("https://ebrhbalrkskrxododiqo.supabase.co/")
+SUPABASE_KEY = os.getenv("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVicmhiYWxya3NrcnhvZG9kaXFvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczODY4MDQsImV4cCI6MjA5Mjk2MjgwNH0.oAuj91Mb5NLwk7-Ju8TBDriDEVeEWA_EuZk689gZESQ")
 
-client = AsyncIOMotorClient(MONGO_URL)
-db = client[DB_NAME]
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 app = FastAPI(title="HatchKod LMS")
 api = APIRouter(prefix="/api")
