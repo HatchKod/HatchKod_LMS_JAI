@@ -237,28 +237,76 @@ async def get_course(course_id: str, user: dict = Depends(get_current_user)):
     if not course:
         raise HTTPException(404, "Course not found")
     modules = await db.modules.find({"course_id": course_id}, {"_id": 0}).sort("sequence_order", 1).to_list(1000)
+    module_ids = [m["id"] for m in modules]
+
+    # Batch-fetch all lessons for all modules in one query
+    all_lessons = await db.lessons.find(
+        {"module_id": {"$in": module_ids}}, {"_id": 0}
+    ).sort("sequence_order", 1).to_list(1000)
+    lesson_ids = [l["id"] for l in all_lessons]
+    lessons_by_module: dict = {}
+    for l in all_lessons:
+        lessons_by_module.setdefault(l["module_id"], []).append(l)
+
+    # Batch-fetch tasks for all lessons
+    tasks_list = await db.tasks.find({"lesson_id": {"$in": lesson_ids}}, {"_id": 0}).to_list(1000)
+    task_by_lesson = {t["lesson_id"]: t for t in tasks_list}
+
+    progress_by_lesson: dict = {}
+    sub_by_lesson: dict = {}
+    if user["role"] == "student" and lesson_ids:
+        # Batch-fetch student progress
+        prog_list = await db.student_progress.find(
+            {"student_id": user["id"], "lesson_id": {"$in": lesson_ids}, "is_completed": True}
+        ).to_list(1000)
+        progress_by_lesson = {p["lesson_id"]: True for p in prog_list}
+
+        # Batch-fetch latest submission per lesson
+        subs_list = await db.submissions.find(
+            {"student_id": user["id"], "lesson_id": {"$in": lesson_ids}}, {"_id": 0}
+        ).sort("submitted_at", -1).to_list(2000)
+        for s in subs_list:
+            sub_by_lesson.setdefault(s["lesson_id"], s)  # first is latest due to sort desc
+
+    # Compute unlocked status using ordered lessons (no extra queries)
+    ordered_all = []
     for m in modules:
-        lessons = await db.lessons.find({"module_id": m["id"]}, {"_id": 0}).sort("sequence_order", 1).to_list(1000)
-        for l in lessons:
-            l["task"] = await db.tasks.find_one({"lesson_id": l["id"]}, {"_id": 0})
+        ordered_all.extend(lessons_by_module.get(m["id"], []))
+
+    unlocked_map: dict = {}
+    if user["role"] == "student":
+        prev_unlocked = True
+        for l in ordered_all:
+            if prev_unlocked and (
+                # first lesson always unlocked OR previous was approved OR previous had no task
+                len(unlocked_map) == 0
+                or True
+            ):
+                pass
+        # simple sequential scan
+        prev_approved_or_no_task = True
+        for idx, l in enumerate(ordered_all):
+            if idx == 0:
+                unlocked_map[l["id"]] = True
+            else:
+                prev = ordered_all[idx - 1]
+                prev_task = task_by_lesson.get(prev["id"])
+                prev_sub = sub_by_lesson.get(prev["id"])
+                unlocked_map[l["id"]] = (not prev_task) or (prev_sub is not None and prev_sub.get("status") == "approved")
+
+    for m in modules:
+        ls = lessons_by_module.get(m["id"], [])
+        for l in ls:
+            l["task"] = task_by_lesson.get(l["id"])
             if user["role"] == "student":
-                l["unlocked"] = await is_lesson_unlocked(user["id"], l["id"])
-                l["completed"] = bool(
-                    await db.student_progress.find_one(
-                        {"student_id": user["id"], "lesson_id": l["id"], "is_completed": True}
-                    )
-                )
-                sub = await db.submissions.find_one(
-                    {"student_id": user["id"], "lesson_id": l["id"]},
-                    {"_id": 0},
-                    sort=[("submitted_at", -1)],
-                )
-                l["submission"] = sub
+                l["unlocked"] = unlocked_map.get(l["id"], False)
+                l["completed"] = bool(progress_by_lesson.get(l["id"]))
+                l["submission"] = sub_by_lesson.get(l["id"])
             else:
                 l["unlocked"] = True
                 l["completed"] = False
                 l["submission"] = None
-        m["lessons"] = lessons
+        m["lessons"] = ls
     course["modules"] = modules
     return course
 
@@ -475,12 +523,20 @@ async def pending_submissions(user: dict = Depends(require_roles("mentor", "admi
         # Show submissions from students assigned to this mentor + unassigned
         query["$or"] = [{"mentor_id": user["id"]}, {"mentor_id": None}]
     subs = await db.submissions.find(query, {"_id": 0}).sort("submitted_at", -1).to_list(1000)
-    # Enrich with student name and lesson title
+    if not subs:
+        return subs
+    # Batch-fetch students and lessons
+    student_ids = list({s["student_id"] for s in subs})
+    lesson_ids = list({s["lesson_id"] for s in subs})
+    students = await db.users.find(
+        {"id": {"$in": student_ids}}, {"_id": 0, "password_hash": 0}
+    ).to_list(1000)
+    student_map = {st["id"]: st for st in students}
+    lessons = await db.lessons.find({"id": {"$in": lesson_ids}}, {"_id": 0}).to_list(1000)
+    lesson_map = {l["id"]: l for l in lessons}
     for s in subs:
-        st = await db.users.find_one({"id": s["student_id"]}, {"_id": 0, "password_hash": 0})
-        s["student"] = st
-        l = await db.lessons.find_one({"id": s["lesson_id"]}, {"_id": 0})
-        s["lesson"] = l
+        s["student"] = student_map.get(s["student_id"])
+        s["lesson"] = lesson_map.get(s["lesson_id"])
     return subs
 
 
@@ -560,18 +616,38 @@ async def student_dashboard(user: dict = Depends(require_roles("student"))):
     courses = await db.courses.find({"status": "published"}, {"_id": 0}).to_list(1000)
     result_courses = []
     next_lesson = None
-    pending_count = 0
+
+    # Batch-fetch all student progress once
+    progress_records = await db.student_progress.find(
+        {"student_id": user["id"], "is_completed": True}
+    ).to_list(5000)
+    progress_set = {p["lesson_id"] for p in progress_records}
+
+    # Batch-fetch all modules for all courses, then all lessons for those modules
+    course_ids = [c["id"] for c in courses]
+    all_modules = await db.modules.find(
+        {"course_id": {"$in": course_ids}}, {"_id": 0}
+    ).sort("sequence_order", 1).to_list(2000)
+    modules_by_course: dict = {}
+    for m in all_modules:
+        modules_by_course.setdefault(m["course_id"], []).append(m)
+    module_ids = [m["id"] for m in all_modules]
+    all_lessons = await db.lessons.find(
+        {"module_id": {"$in": module_ids}}, {"_id": 0}
+    ).sort("sequence_order", 1).to_list(5000)
+    lessons_by_module: dict = {}
+    for l in all_lessons:
+        lessons_by_module.setdefault(l["module_id"], []).append(l)
 
     for c in courses:
-        ordered = await get_ordered_lessons(c["id"])
+        ordered = []
+        for m in modules_by_course.get(c["id"], []):
+            ordered.extend(lessons_by_module.get(m["id"], []))
         total = len(ordered)
         completed = 0
         first_unfinished = None
         for l in ordered:
-            done = await db.student_progress.find_one(
-                {"student_id": user["id"], "lesson_id": l["id"], "is_completed": True}
-            )
-            if done:
+            if l["id"] in progress_set:
                 completed += 1
             elif first_unfinished is None:
                 first_unfinished = l
@@ -590,15 +666,18 @@ async def student_dashboard(user: dict = Depends(require_roles("student"))):
         {"student_id": user["id"], "status": {"$in": ["pending", "rework"]}},
         {"_id": 0},
     ).to_list(1000)
-    for p in pending:
-        p["lesson"] = await db.lessons.find_one({"id": p["lesson_id"]}, {"_id": 0})
-    pending_count = len(pending)
+    if pending:
+        p_lesson_ids = list({p["lesson_id"] for p in pending})
+        p_lessons = await db.lessons.find({"id": {"$in": p_lesson_ids}}, {"_id": 0}).to_list(1000)
+        p_lesson_map = {l["id"]: l for l in p_lessons}
+        for p in pending:
+            p["lesson"] = p_lesson_map.get(p["lesson_id"])
 
     return {
         "courses": result_courses,
         "next_lesson": next_lesson,
         "pending_submissions": pending,
-        "pending_count": pending_count,
+        "pending_count": len(pending),
     }
 
 
