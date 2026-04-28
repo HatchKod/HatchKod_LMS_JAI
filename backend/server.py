@@ -16,12 +16,23 @@ from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request, Respons
 from starlette.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, EmailStr
 from supabase import create_client
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
 
 
 # -------------------- Config --------------------
 
-SUPABASE_URL = os.getenv("https://ebrhbalrkskrxododiqo.supabase.co/")
-SUPABASE_KEY = os.getenv("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVicmhiYWxya3NrcnhvZG9kaXFvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczODY4MDQsImV4cCI6MjA5Mjk2MjgwNH0.oAuj91Mb5NLwk7-Ju8TBDriDEVeEWA_EuZk689gZESQ")
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
+JWT_SECRET = os.getenv("JWT_SECRET")
+JWT_ALGORITHM = os.getenv("JWT_ALGORITHM")
+ACCESS_TOKEN_MIN = int(os.getenv("ACCESS_TOKEN_MIN", 60))
+
+ADMIN_EMAIL = os.getenv("ADMIN_EMAIL")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
@@ -33,6 +44,10 @@ logger = logging.getLogger("hatchkod")
 
 
 # -------------------- Helpers --------------------
+def get_single_or_none(query):
+    res = query.execute().data
+    return res[0] if res else None
+
 def now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -88,7 +103,7 @@ async def get_current_user(request: Request) -> dict:
         raise HTTPException(status_code=401, detail="Token expired")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
-    user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0, "password_hash": 0})
+    user = get_single_or_none(supabase.table("users").select("*").eq("id", payload["sub"]))
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
     return user
@@ -158,7 +173,8 @@ class AssignMentorIn(BaseModel):
 @api.post("/auth/register")
 async def register(payload: RegisterIn, response: Response):
     email = payload.email.lower()
-    if await db.users.find_one({"email": email}):
+    existing = supabase.table("users").select("id").eq("email", email).execute()
+    if existing.data:
         raise HTTPException(status_code=400, detail="Email already registered")
     user_id = str(uuid.uuid4())
     user_doc = {
@@ -170,24 +186,22 @@ async def register(payload: RegisterIn, response: Response):
         "assigned_mentor_id": None,
         "created_at": iso(now_utc()),
     }
-    await db.users.insert_one(user_doc)
+    supabase.table("users").insert(user_doc).execute()
     token = create_token(user_id, email, payload.role)
     set_auth_cookie(response, token)
     user_doc.pop("password_hash", None)
-    user_doc.pop("_id", None)
     return {"user": user_doc, "token": token}
 
 
 @api.post("/auth/login")
 async def login(payload: LoginIn, response: Response):
     email = payload.email.lower()
-    user = await db.users.find_one({"email": email})
+    user = get_single_or_none(supabase.table("users").select("*").eq("email", email))
     if not user or not verify_password(payload.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     token = create_token(user["id"], user["email"], user["role"])
     set_auth_cookie(response, token)
     user.pop("password_hash", None)
-    user.pop("_id", None)
     return {"user": user, "token": token}
 
 
@@ -205,7 +219,7 @@ async def me(user: dict = Depends(get_current_user)):
 # -------------------- Courses (Admin) --------------------
 @api.get("/courses")
 async def list_courses(_: dict = Depends(get_current_user)):
-    courses = await db.courses.find({}, {"_id": 0}).sort("created_at", 1).to_list(1000)
+    courses = supabase.table("courses").select("*").order("created_at").execute().data
     return courses
 
 
@@ -220,45 +234,38 @@ async def create_course(payload: CourseIn, _: dict = Depends(require_roles("admi
         "status": payload.status,
         "created_at": iso(now_utc()),
     }
-    await db.courses.insert_one(doc)
-    doc.pop("_id", None)
+    supabase.table("courses").insert(doc).execute()
     return doc
 
 
 @api.get("/courses/{course_id}")
 async def get_course(course_id: str, user: dict = Depends(get_current_user)):
-    course = await db.courses.find_one({"id": course_id}, {"_id": 0})
+    course = get_single_or_none(supabase.table("courses").select("*").eq("id", course_id))
     if not course:
         raise HTTPException(404, "Course not found")
-    modules = await db.modules.find({"course_id": course_id}, {"_id": 0}).sort("sequence_order", 1).to_list(1000)
+    modules = supabase.table("modules").select("*").eq("course_id", course_id).order("sequence_order").execute().data
     module_ids = [m["id"] for m in modules]
 
     # Batch-fetch all lessons for all modules in one query
-    all_lessons = await db.lessons.find(
-        {"module_id": {"$in": module_ids}}, {"_id": 0}
-    ).sort("sequence_order", 1).to_list(1000)
+    all_lessons = supabase.table("lessons").select("*").in_("module_id", module_ids).order("sequence_order").execute().data
     lesson_ids = [l["id"] for l in all_lessons]
-    lessons_by_module: dict = {}
+    lessons_by_module = {}
     for l in all_lessons:
         lessons_by_module.setdefault(l["module_id"], []).append(l)
 
     # Batch-fetch tasks for all lessons
-    tasks_list = await db.tasks.find({"lesson_id": {"$in": lesson_ids}}, {"_id": 0}).to_list(1000)
+    tasks_list = supabase.table("tasks").select("*").in_("lesson_id", lesson_ids).execute().data
     task_by_lesson = {t["lesson_id"]: t for t in tasks_list}
 
-    progress_by_lesson: dict = {}
-    sub_by_lesson: dict = {}
+    progress_by_lesson = {}
+    sub_by_lesson = {}
     if user["role"] == "student" and lesson_ids:
         # Batch-fetch student progress
-        prog_list = await db.student_progress.find(
-            {"student_id": user["id"], "lesson_id": {"$in": lesson_ids}, "is_completed": True}
-        ).to_list(1000)
+        prog_list = supabase.table("student_progress").select("*").eq("student_id", user["id"]).in_("lesson_id", lesson_ids).eq("is_completed", True).execute().data
         progress_by_lesson = {p["lesson_id"]: True for p in prog_list}
 
         # Batch-fetch latest submission per lesson
-        subs_list = await db.submissions.find(
-            {"student_id": user["id"], "lesson_id": {"$in": lesson_ids}}, {"_id": 0}
-        ).sort("submitted_at", -1).to_list(2000)
+        subs_list = supabase.table("submissions").select("*").eq("student_id", user["id"]).in_("lesson_id", lesson_ids).order("submitted_at", desc=True).execute().data
         for s in subs_list:
             sub_by_lesson.setdefault(s["lesson_id"], s)  # first is latest due to sort desc
 
@@ -267,7 +274,7 @@ async def get_course(course_id: str, user: dict = Depends(get_current_user)):
     for m in modules:
         ordered_all.extend(lessons_by_module.get(m["id"], []))
 
-    unlocked_map: dict = {}
+    unlocked_map = {}
     if user["role"] == "student":
         prev_unlocked = True
         for l in ordered_all:
@@ -307,21 +314,22 @@ async def get_course(course_id: str, user: dict = Depends(get_current_user)):
 
 @api.delete("/courses/{course_id}")
 async def delete_course(course_id: str, _: dict = Depends(require_roles("admin"))):
-    await db.courses.delete_one({"id": course_id})
-    mods = await db.modules.find({"course_id": course_id}, {"_id": 0}).to_list(1000)
+    supabase.table("courses").delete().eq("id", course_id).execute()
+    mods = supabase.table("modules").select("id").eq("course_id", course_id).execute().data
     mod_ids = [m["id"] for m in mods]
-    lessons = await db.lessons.find({"module_id": {"$in": mod_ids}}, {"_id": 0}).to_list(1000)
+    lessons = supabase.table("lessons").select("id").in_("module_id", mod_ids).execute().data
     lesson_ids = [l["id"] for l in lessons]
-    await db.modules.delete_many({"course_id": course_id})
-    await db.lessons.delete_many({"module_id": {"$in": mod_ids}})
-    await db.tasks.delete_many({"lesson_id": {"$in": lesson_ids}})
+    supabase.table("modules").delete().eq("course_id", course_id).execute()
+    supabase.table("lessons").delete().in_("module_id", mod_ids).execute()
+    supabase.table("tasks").delete().in_("lesson_id", lesson_ids).execute()
     return {"ok": True}
 
 
 # -------------------- Modules --------------------
 @api.post("/courses/{course_id}/modules")
 async def create_module(course_id: str, payload: ModuleIn, _: dict = Depends(require_roles("admin"))):
-    if not await db.courses.find_one({"id": course_id}):
+    existing = supabase.table("courses").select("id").eq("id", course_id).execute()
+    if not existing.data:
         raise HTTPException(404, "Course not found")
     mid = str(uuid.uuid4())
     doc = {
@@ -331,25 +339,25 @@ async def create_module(course_id: str, payload: ModuleIn, _: dict = Depends(req
         "sequence_order": payload.sequence_order,
         "created_at": iso(now_utc()),
     }
-    await db.modules.insert_one(doc)
-    doc.pop("_id", None)
+    supabase.table("modules").insert(doc).execute()
     return doc
 
 
 @api.delete("/modules/{module_id}")
 async def delete_module(module_id: str, _: dict = Depends(require_roles("admin"))):
-    lessons = await db.lessons.find({"module_id": module_id}, {"_id": 0}).to_list(1000)
+    lessons = supabase.table("lessons").select("id").eq("module_id", module_id).execute().data
     lesson_ids = [l["id"] for l in lessons]
-    await db.modules.delete_one({"id": module_id})
-    await db.lessons.delete_many({"module_id": module_id})
-    await db.tasks.delete_many({"lesson_id": {"$in": lesson_ids}})
+    supabase.table("modules").delete().eq("id", module_id).execute()
+    supabase.table("lessons").delete().eq("module_id", module_id).execute()
+    supabase.table("tasks").delete().in_("lesson_id", lesson_ids).execute()
     return {"ok": True}
 
 
 # -------------------- Lessons --------------------
 @api.post("/modules/{module_id}/lessons")
 async def create_lesson(module_id: str, payload: LessonIn, _: dict = Depends(require_roles("admin"))):
-    if not await db.modules.find_one({"id": module_id}):
+    existing = supabase.table("modules").select("id").eq("id", module_id).execute()
+    if not existing.data:
         raise HTTPException(404, "Module not found")
     lid = str(uuid.uuid4())
     doc = {
@@ -361,36 +369,32 @@ async def create_lesson(module_id: str, payload: LessonIn, _: dict = Depends(req
         "sequence_order": payload.sequence_order,
         "created_at": iso(now_utc()),
     }
-    await db.lessons.insert_one(doc)
-    doc.pop("_id", None)
+    supabase.table("lessons").insert(doc).execute()
     return doc
 
 
 @api.delete("/lessons/{lesson_id}")
 async def delete_lesson(lesson_id: str, _: dict = Depends(require_roles("admin"))):
-    await db.lessons.delete_one({"id": lesson_id})
-    await db.tasks.delete_many({"lesson_id": lesson_id})
+    supabase.table("lessons").delete().eq("id", lesson_id).execute()
+    supabase.table("tasks").delete().eq("lesson_id", lesson_id).execute()
     return {"ok": True}
 
 
 @api.get("/lessons/{lesson_id}")
 async def get_lesson(lesson_id: str, user: dict = Depends(get_current_user)):
-    lesson = await db.lessons.find_one({"id": lesson_id}, {"_id": 0})
+    lesson = get_single_or_none(supabase.table("lessons").select("*").eq("id", lesson_id))
     if not lesson:
         raise HTTPException(404, "Lesson not found")
-    module = await db.modules.find_one({"id": lesson["module_id"]}, {"_id": 0})
-    course = await db.courses.find_one({"id": module["course_id"]}, {"_id": 0}) if module else None
-    task = await db.tasks.find_one({"lesson_id": lesson_id}, {"_id": 0})
+    module = get_single_or_none(supabase.table("modules").select("*").eq("id", lesson["module_id"]))
+    course = get_single_or_none(supabase.table("courses").select("*").eq("id", module["course_id"])) if module else None
+    task = get_single_or_none(supabase.table("tasks").select("*").eq("lesson_id", lesson_id))
 
     if user["role"] == "student":
         unlocked = await is_lesson_unlocked(user["id"], lesson_id)
         if not unlocked:
             raise HTTPException(status_code=403, detail="Lesson is locked. Complete previous tasks first.")
-        sub = await db.submissions.find_one(
-            {"student_id": user["id"], "lesson_id": lesson_id},
-            {"_id": 0},
-            sort=[("submitted_at", -1)],
-        )
+        sub = supabase.table("submissions").select("*").eq("student_id", user["id"]).eq("lesson_id", lesson_id).order("submitted_at", desc=True).limit(1).execute().data
+        sub = sub[0] if sub else None
     else:
         sub = None
 
@@ -400,19 +404,18 @@ async def get_lesson(lesson_id: str, user: dict = Depends(get_current_user)):
 # -------------------- Tasks --------------------
 @api.post("/lessons/{lesson_id}/task")
 async def upsert_task(lesson_id: str, payload: TaskIn, _: dict = Depends(require_roles("admin"))):
-    if not await db.lessons.find_one({"id": lesson_id}):
+    existing = supabase.table("lessons").select("id").eq("id", lesson_id).execute()
+    if not existing.data:
         raise HTTPException(404, "Lesson not found")
-    existing = await db.tasks.find_one({"lesson_id": lesson_id})
-    if existing:
-        await db.tasks.update_one(
-            {"lesson_id": lesson_id},
-            {"$set": {
-                "description": payload.description,
-                "instructions": payload.instructions,
-                "expected_output": payload.expected_output,
-            }},
-        )
-        return await db.tasks.find_one({"lesson_id": lesson_id}, {"_id": 0})
+    existing_task_resp = supabase.table("tasks").select("*").eq("lesson_id", lesson_id).execute().data
+    existing_task = existing_task_resp[0] if existing_task_resp else None
+    if existing_task:
+        supabase.table("tasks").update({
+            "description": payload.description,
+            "instructions": payload.instructions,
+            "expected_output": payload.expected_output,
+        }).eq("lesson_id", lesson_id).execute()
+        return supabase.table("tasks").select("*").eq("lesson_id", lesson_id).execute().data[0]
     tid = str(uuid.uuid4())
     doc = {
         "id": tid,
@@ -422,27 +425,26 @@ async def upsert_task(lesson_id: str, payload: TaskIn, _: dict = Depends(require
         "expected_output": payload.expected_output,
         "created_at": iso(now_utc()),
     }
-    await db.tasks.insert_one(doc)
-    doc.pop("_id", None)
+    supabase.table("tasks").insert(doc).execute()
     return doc
 
 
 # -------------------- Lock/Unlock helper --------------------
 async def get_ordered_lessons(course_id: str) -> list:
-    modules = await db.modules.find({"course_id": course_id}, {"_id": 0}).sort("sequence_order", 1).to_list(1000)
+    modules = supabase.table("modules").select("*").eq("course_id", course_id).order("sequence_order").execute().data
     ordered = []
     for m in modules:
-        lessons = await db.lessons.find({"module_id": m["id"]}, {"_id": 0}).sort("sequence_order", 1).to_list(1000)
+        lessons = supabase.table("lessons").select("*").eq("module_id", m["id"]).order("sequence_order").execute().data
         ordered.extend(lessons)
     return ordered
 
 
 async def is_lesson_unlocked(student_id: str, lesson_id: str) -> bool:
     """Lesson N+1 unlocks only when Lesson N's task is approved."""
-    lesson = await db.lessons.find_one({"id": lesson_id}, {"_id": 0})
+    lesson = get_single_or_none(supabase.table("lessons").select("*").eq("id", lesson_id))
     if not lesson:
         return False
-    module = await db.modules.find_one({"id": lesson["module_id"]}, {"_id": 0})
+    module = get_single_or_none(supabase.table("modules").select("*").eq("id", lesson["module_id"]))
     if not module:
         return False
     ordered = await get_ordered_lessons(module["course_id"])
@@ -450,12 +452,9 @@ async def is_lesson_unlocked(student_id: str, lesson_id: str) -> bool:
     if idx <= 0:
         return True
     prev = ordered[idx - 1]
-    sub = await db.submissions.find_one(
-        {"student_id": student_id, "lesson_id": prev["id"], "status": "approved"},
-        {"_id": 0},
-    )
+    sub = get_single_or_none(supabase.table("submissions").select("*").eq("student_id", student_id).eq("lesson_id", prev["id"]).eq("status", "approved"))
     # If previous lesson has no task, treat as auto-unlocked
-    prev_task = await db.tasks.find_one({"lesson_id": prev["id"]}, {"_id": 0})
+    prev_task = get_single_or_none(supabase.table("tasks").select("*").eq("lesson_id", prev["id"]))
     if not prev_task:
         return True
     return bool(sub)
@@ -464,7 +463,7 @@ async def is_lesson_unlocked(student_id: str, lesson_id: str) -> bool:
 # -------------------- Submissions --------------------
 @api.post("/lessons/{lesson_id}/submit")
 async def submit_task(lesson_id: str, payload: SubmissionIn, user: dict = Depends(require_roles("student"))):
-    task = await db.tasks.find_one({"lesson_id": lesson_id}, {"_id": 0})
+    task = get_single_or_none(supabase.table("tasks").select("*").eq("lesson_id", lesson_id))
     if not task:
         raise HTTPException(404, "No task for this lesson")
     if not await is_lesson_unlocked(user["id"], lesson_id):
@@ -473,23 +472,17 @@ async def submit_task(lesson_id: str, payload: SubmissionIn, user: dict = Depend
         raise HTTPException(400, "Provide GitHub link or text")
 
     # If a previous submission is in 'rework' or 'pending', overwrite it; else create new
-    existing = await db.submissions.find_one(
-        {"student_id": user["id"], "lesson_id": lesson_id},
-        sort=[("submitted_at", -1)],
-    )
-    if existing and existing.get("status") in ("rework", "pending"):
-        await db.submissions.update_one(
-            {"id": existing["id"]},
-            {"$set": {
-                "submission_url": payload.submission_url or "",
-                "submission_text": payload.submission_text or "",
-                "status": "pending",
-                "feedback": "",
-                "submitted_at": iso(now_utc()),
-                "reviewed_at": None,
-            }},
-        )
-        return await db.submissions.find_one({"id": existing["id"]}, {"_id": 0})
+    existing = supabase.table("submissions").select("*").eq("student_id", user["id"]).eq("lesson_id", lesson_id).order("submitted_at", desc=True).limit(1).execute().data
+    if existing and existing[0].get("status") in ("rework", "pending"):
+        supabase.table("submissions").update({
+            "submission_url": payload.submission_url or "",
+            "submission_text": payload.submission_text or "",
+            "status": "pending",
+            "feedback": "",
+            "submitted_at": iso(now_utc()),
+            "reviewed_at": None,
+        }).eq("id", existing[0]["id"]).execute()
+        return get_single_or_none(supabase.table("submissions").select("*").eq("id", existing[0]["id"]))
 
     sid = str(uuid.uuid4())
     doc = {
@@ -505,28 +498,25 @@ async def submit_task(lesson_id: str, payload: SubmissionIn, user: dict = Depend
         "submitted_at": iso(now_utc()),
         "reviewed_at": None,
     }
-    await db.submissions.insert_one(doc)
-    doc.pop("_id", None)
+    supabase.table("submissions").insert(doc).execute()
     return doc
 
 
 @api.get("/submissions/pending")
 async def pending_submissions(user: dict = Depends(require_roles("mentor", "admin"))):
-    query = {"status": {"$in": ["pending", "rework"]}}
+    query = supabase.table("submissions").select("*").in_("status", ["pending", "rework"])
     if user["role"] == "mentor":
         # Show submissions from students assigned to this mentor + unassigned
-        query["$or"] = [{"mentor_id": user["id"]}, {"mentor_id": None}]
-    subs = await db.submissions.find(query, {"_id": 0}).sort("submitted_at", -1).to_list(1000)
+        query = query.or_("mentor_id.eq." + user["id"] + ",mentor_id.is.null")
+    subs = query.order("submitted_at", desc=True).execute().data
     if not subs:
         return subs
     # Batch-fetch students and lessons
     student_ids = list({s["student_id"] for s in subs})
     lesson_ids = list({s["lesson_id"] for s in subs})
-    students = await db.users.find(
-        {"id": {"$in": student_ids}}, {"_id": 0, "password_hash": 0}
-    ).to_list(1000)
+    students = supabase.table("users").select("*").in_("id", student_ids).execute().data
     student_map = {st["id"]: st for st in students}
-    lessons = await db.lessons.find({"id": {"$in": lesson_ids}}, {"_id": 0}).to_list(1000)
+    lessons = supabase.table("lessons").select("*").in_("id", lesson_ids).execute().data
     lesson_map = {l["id"]: l for l in lessons}
     for s in subs:
         s["student"] = student_map.get(s["student_id"])
@@ -536,16 +526,14 @@ async def pending_submissions(user: dict = Depends(require_roles("mentor", "admi
 
 @api.get("/submissions/{submission_id}")
 async def get_submission(submission_id: str, user: dict = Depends(get_current_user)):
-    sub = await db.submissions.find_one({"id": submission_id}, {"_id": 0})
+    sub = get_single_or_none(supabase.table("submissions").select("*").eq("id", submission_id))
     if not sub:
         raise HTTPException(404, "Submission not found")
     if user["role"] == "student" and sub["student_id"] != user["id"]:
         raise HTTPException(403, "Forbidden")
-    sub["student"] = await db.users.find_one(
-        {"id": sub["student_id"]}, {"_id": 0, "password_hash": 0}
-    )
-    sub["lesson"] = await db.lessons.find_one({"id": sub["lesson_id"]}, {"_id": 0})
-    sub["task"] = await db.tasks.find_one({"id": sub["task_id"]}, {"_id": 0})
+    sub["student"] = get_single_or_none(supabase.table("users").select("*").eq("id", sub["student_id"]))
+    sub["lesson"] = get_single_or_none(supabase.table("lessons").select("*").eq("id", sub["lesson_id"]))
+    sub["task"] = get_single_or_none(supabase.table("tasks").select("*").eq("id", sub["task_id"]))
     return sub
 
 
@@ -553,7 +541,7 @@ async def get_submission(submission_id: str, user: dict = Depends(get_current_us
 async def review_submission(
     submission_id: str, payload: ReviewIn, user: dict = Depends(require_roles("mentor", "admin"))
 ):
-    sub = await db.submissions.find_one({"id": submission_id}, {"_id": 0})
+    sub = get_single_or_none(supabase.table("submissions").select("*").eq("id", submission_id))
     if not sub:
         raise HTTPException(404, "Submission not found")
     update = {
@@ -562,74 +550,61 @@ async def review_submission(
         "mentor_id": user["id"],
         "reviewed_at": iso(now_utc()),
     }
-    await db.submissions.update_one({"id": submission_id}, {"$set": update})
+    supabase.table("submissions").update(update).eq("id", submission_id).execute()
     if payload.status == "approved":
-        await db.student_progress.update_one(
-            {"student_id": sub["student_id"], "lesson_id": sub["lesson_id"]},
-            {"$set": {
-                "student_id": sub["student_id"],
-                "lesson_id": sub["lesson_id"],
-                "is_completed": True,
-                "completed_at": iso(now_utc()),
-            }},
-            upsert=True,
-        )
-    return await db.submissions.find_one({"id": submission_id}, {"_id": 0})
+        supabase.table("student_progress").upsert({
+            "student_id": sub["student_id"],
+            "lesson_id": sub["lesson_id"],
+            "is_completed": True,
+            "completed_at": iso(now_utc()),
+        }).execute()
+    return get_single_or_none(supabase.table("submissions").select("*").eq("id", submission_id))
 
 
 # -------------------- Users / Admin --------------------
 @api.get("/users")
 async def list_users(role: Optional[str] = None, _: dict = Depends(require_roles("admin"))):
-    q = {}
+    query = supabase.table("users").select("*")
     if role:
-        q["role"] = role
-    users = await db.users.find(q, {"_id": 0, "password_hash": 0}).to_list(1000)
+        query = query.eq("role", role)
+    users = query.execute().data
     return users
 
 
 @api.post("/users/{user_id}/assign-mentor")
 async def assign_mentor(user_id: str, payload: AssignMentorIn, _: dict = Depends(require_roles("admin"))):
-    student = await db.users.find_one({"id": user_id})
+    student = get_single_or_none(supabase.table("users").select("*").eq("id", user_id))
     if not student or student["role"] != "student":
         raise HTTPException(404, "Student not found")
-    mentor = await db.users.find_one({"id": payload.mentor_id})
+    mentor = get_single_or_none(supabase.table("users").select("*").eq("id", payload.mentor_id))
     if not mentor or mentor["role"] != "mentor":
         raise HTTPException(404, "Mentor not found")
-    await db.users.update_one({"id": user_id}, {"$set": {"assigned_mentor_id": payload.mentor_id}})
+    supabase.table("users").update({"assigned_mentor_id": payload.mentor_id}).eq("id", user_id).execute()
     # Update existing pending submissions
-    await db.submissions.update_many(
-        {"student_id": user_id, "status": {"$in": ["pending", "rework"]}},
-        {"$set": {"mentor_id": payload.mentor_id}},
-    )
+    supabase.table("submissions").update({"mentor_id": payload.mentor_id}).eq("student_id", user_id).in_("status", ["pending", "rework"]).execute()
     return {"ok": True}
 
 
 # -------------------- Dashboards --------------------
 @api.get("/dashboard/student")
 async def student_dashboard(user: dict = Depends(require_roles("student"))):
-    courses = await db.courses.find({"status": "published"}, {"_id": 0}).to_list(1000)
+    courses = supabase.table("courses").select("*").eq("status", "published").execute().data
     result_courses = []
     next_lesson = None
 
     # Batch-fetch all student progress once
-    progress_records = await db.student_progress.find(
-        {"student_id": user["id"], "is_completed": True}
-    ).to_list(5000)
+    progress_records = supabase.table("student_progress").select("*").eq("student_id", user["id"]).eq("is_completed", True).execute().data
     progress_set = {p["lesson_id"] for p in progress_records}
 
     # Batch-fetch all modules for all courses, then all lessons for those modules
     course_ids = [c["id"] for c in courses]
-    all_modules = await db.modules.find(
-        {"course_id": {"$in": course_ids}}, {"_id": 0}
-    ).sort("sequence_order", 1).to_list(2000)
-    modules_by_course: dict = {}
+    all_modules = supabase.table("modules").select("*").in_("course_id", course_ids).order("sequence_order").execute().data
+    modules_by_course = {}
     for m in all_modules:
         modules_by_course.setdefault(m["course_id"], []).append(m)
     module_ids = [m["id"] for m in all_modules]
-    all_lessons = await db.lessons.find(
-        {"module_id": {"$in": module_ids}}, {"_id": 0}
-    ).sort("sequence_order", 1).to_list(5000)
-    lessons_by_module: dict = {}
+    all_lessons = supabase.table("lessons").select("*").in_("module_id", module_ids).order("sequence_order").execute().data
+    lessons_by_module = {}
     for l in all_lessons:
         lessons_by_module.setdefault(l["module_id"], []).append(l)
 
@@ -656,13 +631,10 @@ async def student_dashboard(user: dict = Depends(require_roles("student"))):
         if next_lesson is None and first_unfinished is not None:
             next_lesson = {"course": c, "lesson": first_unfinished}
 
-    pending = await db.submissions.find(
-        {"student_id": user["id"], "status": {"$in": ["pending", "rework"]}},
-        {"_id": 0},
-    ).to_list(1000)
+    pending = supabase.table("submissions").select("*").eq("student_id", user["id"]).in_("status", ["pending", "rework"]).execute().data
     if pending:
         p_lesson_ids = list({p["lesson_id"] for p in pending})
-        p_lessons = await db.lessons.find({"id": {"$in": p_lesson_ids}}, {"_id": 0}).to_list(1000)
+        p_lessons = supabase.table("lessons").select("*").in_("id", p_lesson_ids).execute().data
         p_lesson_map = {l["id"]: l for l in p_lessons}
         for p in pending:
             p["lesson"] = p_lesson_map.get(p["lesson_id"])
@@ -677,25 +649,22 @@ async def student_dashboard(user: dict = Depends(require_roles("student"))):
 
 @api.get("/dashboard/mentor")
 async def mentor_dashboard(user: dict = Depends(require_roles("mentor"))):
-    pending = await db.submissions.count_documents({
-        "$or": [{"mentor_id": user["id"]}, {"mentor_id": None}],
-        "status": {"$in": ["pending", "rework"]},
-    })
-    approved = await db.submissions.count_documents({"mentor_id": user["id"], "status": "approved"})
-    students = await db.users.count_documents({"assigned_mentor_id": user["id"]})
+    pending = supabase.table("submissions").select("*", count="exact").or_("mentor_id.eq." + user["id"] + ",mentor_id.is.null").in_("status", ["pending", "rework"]).execute().count
+    approved = supabase.table("submissions").select("*", count="exact").eq("mentor_id", user["id"]).eq("status", "approved").execute().count
+    students = supabase.table("users").select("*", count="exact").eq("assigned_mentor_id", user["id"]).execute().count
     return {"pending_reviews": pending, "approved_total": approved, "students_assigned": students}
 
 
 @api.get("/dashboard/admin")
 async def admin_dashboard(_: dict = Depends(require_roles("admin"))):
     return {
-        "courses": await db.courses.count_documents({}),
-        "modules": await db.modules.count_documents({}),
-        "lessons": await db.lessons.count_documents({}),
-        "students": await db.users.count_documents({"role": "student"}),
-        "mentors": await db.users.count_documents({"role": "mentor"}),
-        "pending_submissions": await db.submissions.count_documents({"status": {"$in": ["pending", "rework"]}}),
-        "approved_submissions": await db.submissions.count_documents({"status": "approved"}),
+        "courses": supabase.table("courses").select("*", count="exact").execute().count,
+        "modules": supabase.table("modules").select("*", count="exact").execute().count,
+        "lessons": supabase.table("lessons").select("*", count="exact").execute().count,
+        "students": supabase.table("users").select("*", count="exact").eq("role", "student").execute().count,
+        "mentors": supabase.table("users").select("*", count="exact").eq("role", "mentor").execute().count,
+        "pending_submissions": supabase.table("submissions").select("*", count="exact").in_("status", ["pending", "rework"]).execute().count,
+        "approved_submissions": supabase.table("submissions").select("*", count="exact").eq("status", "approved").execute().count,
     }
 
 
@@ -716,19 +685,12 @@ app.add_middleware(
 
 
 # -------------------- Seed --------------------
-async def seed_data():
-    await db.users.create_index("email", unique=True)
-    await db.courses.create_index("id", unique=True)
-    await db.modules.create_index("id", unique=True)
-    await db.lessons.create_index("id", unique=True)
-    await db.tasks.create_index("id", unique=True)
-    await db.submissions.create_index("id", unique=True)
-
+def seed_data():
     # Admin
-    admin = await db.users.find_one({"email": ADMIN_EMAIL})
+    admin = supabase.table("users").select("*").eq("email", ADMIN_EMAIL).execute().data
     if not admin:
         admin_id = str(uuid.uuid4())
-        await db.users.insert_one({
+        supabase.table("users").insert({
             "id": admin_id,
             "name": "HatchKod Admin",
             "email": ADMIN_EMAIL,
@@ -736,15 +698,15 @@ async def seed_data():
             "role": "admin",
             "assigned_mentor_id": None,
             "created_at": iso(now_utc()),
-        })
+        }).execute()
         logger.info("Seeded admin")
 
     # Mentor
     mentor_email = "mentor@hatchkod.com"
-    mentor = await db.users.find_one({"email": mentor_email})
+    mentor = supabase.table("users").select("*").eq("email", mentor_email).execute().data
     if not mentor:
         mentor_id = str(uuid.uuid4())
-        await db.users.insert_one({
+        supabase.table("users").insert({
             "id": mentor_id,
             "name": "Riya Mentor",
             "email": mentor_email,
@@ -752,16 +714,16 @@ async def seed_data():
             "role": "mentor",
             "assigned_mentor_id": None,
             "created_at": iso(now_utc()),
-        })
-        mentor = await db.users.find_one({"email": mentor_email})
+        }).execute()
+        mentor = get_single_or_none(supabase.table("users").select("*").eq("email", mentor_email))
         logger.info("Seeded mentor")
 
     # Student
     student_email = "student@hatchkod.com"
-    student = await db.users.find_one({"email": student_email})
+    student = supabase.table("users").select("*").eq("email", student_email).execute().data
     if not student:
         student_id = str(uuid.uuid4())
-        await db.users.insert_one({
+        supabase.table("users").insert({
             "id": student_id,
             "name": "Aman Student",
             "email": student_email,
@@ -769,20 +731,21 @@ async def seed_data():
             "role": "student",
             "assigned_mentor_id": mentor["id"],
             "created_at": iso(now_utc()),
-        })
+        }).execute()
         logger.info("Seeded student")
 
     # Sample course
-    if await db.courses.count_documents({}) == 0:
+    courses_count = supabase.table("courses").select("*", count="exact").execute().count
+    if courses_count == 0:
         course_id = str(uuid.uuid4())
-        await db.courses.insert_one({
+        supabase.table("courses").insert({
             "id": course_id,
             "title": "Java Full Stack Bootcamp",
             "description": "Become a job-ready full-stack developer. Learn Java, Spring Boot, React, and ship real projects.",
             "thumbnail_url": "https://images.pexels.com/photos/6424589/pexels-photo-6424589.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
             "status": "published",
             "created_at": iso(now_utc()),
-        })
+        }).execute()
 
         modules_data = [
             {
@@ -835,16 +798,16 @@ async def seed_data():
 
         for m_idx, m in enumerate(modules_data):
             mid = str(uuid.uuid4())
-            await db.modules.insert_one({
+            supabase.table("modules").insert({
                 "id": mid,
                 "course_id": course_id,
                 "title": m["title"],
                 "sequence_order": m_idx,
                 "created_at": iso(now_utc()),
-            })
+            }).execute()
             for l_idx, l in enumerate(m["lessons"]):
                 lid = str(uuid.uuid4())
-                await db.lessons.insert_one({
+                supabase.table("lessons").insert({
                     "id": lid,
                     "module_id": mid,
                     "title": l["title"],
@@ -852,27 +815,24 @@ async def seed_data():
                     "content": l["content"],
                     "sequence_order": l_idx,
                     "created_at": iso(now_utc()),
-                })
+                }).execute()
                 tid = str(uuid.uuid4())
-                await db.tasks.insert_one({
+                supabase.table("tasks").insert({
                     "id": tid,
                     "lesson_id": lid,
                     "description": l["task"]["description"],
                     "instructions": l["task"]["instructions"],
                     "expected_output": l["task"]["expected_output"],
                     "created_at": iso(now_utc()),
-                })
+                }).execute()
         logger.info("Seeded sample course")
 
 
 @app.on_event("startup")
 async def on_startup():
-    try:
-        await seed_data()
-    except Exception as e:
-        logger.exception("Seed failed: %s", e)
+    seed_data()
 
 
 @app.on_event("shutdown")
 async def on_shutdown():
-    client.close()
+    pass

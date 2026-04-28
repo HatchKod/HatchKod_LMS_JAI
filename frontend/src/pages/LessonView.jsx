@@ -78,6 +78,22 @@ export default function LessonView() {
   const isStudent = user?.role === "student";
   const canResubmit = !submission || submission.status === "rework";
 
+  const getEmbedUrl = (url) => {
+    if (!url) return url;
+    try {
+      const urlObj = new URL(url);
+      if (urlObj.hostname.includes("youtube.com") && urlObj.searchParams.has("v")) {
+        return `https://www.youtube.com/embed/${urlObj.searchParams.get("v")}`;
+      }
+      if (urlObj.hostname === "youtu.be") {
+        return `https://www.youtube.com/embed${urlObj.pathname}`;
+      }
+      return url;
+    } catch {
+      return url;
+    }
+  };
+
   return (
     <div className="min-h-screen bg-white">
       <Navbar />
@@ -91,7 +107,7 @@ export default function LessonView() {
           {lesson.video_url ? (
             <div className="aspect-video w-full bg-black">
               <iframe
-                src={lesson.video_url}
+                src={getEmbedUrl(lesson.video_url)}
                 title={lesson.title}
                 allow="autoplay; encrypted-media; picture-in-picture"
                 allowFullScreen

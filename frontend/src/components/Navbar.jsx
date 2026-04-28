@@ -15,9 +15,7 @@ export default function Navbar() {
     <header className="sticky top-0 z-40 w-full border-b border-border bg-white" data-testid="navbar">
       <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 sm:px-6">
         <Link to={user ? dashHref : "/"} className="flex items-center gap-2" data-testid="brand-link">
-          <span className="grid h-7 w-7 place-items-center bg-[#194BFB] text-white">
-            <GraduationCap className="h-4 w-4" />
-          </span>
+          <img src="/logo.png" alt="HatchKod" className="h-10 w-auto object-contain" />
           <span className="font-[Outfit] text-lg font-bold tracking-tight">HatchKod</span>
           <span className="hidden rounded-sm border border-border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-slate-500 sm:inline">
             LMS
