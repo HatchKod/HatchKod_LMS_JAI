@@ -1,0 +1,88 @@
+{
+  "theme": "light",
+  "archetype": "Swiss & High-Contrast (Archetype 4)",
+  "mood": "Professional, structured, technical, authoritative",
+  "typography": {
+    "heading_font": "Outfit",
+    "body_font": "IBM Plex Sans",
+    "mono_font": "JetBrains Mono",
+    "import_url": "https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@300;400;500;600;700;800&display=swap",
+    "hierarchy": {
+      "h1": "text-4xl sm:text-5xl font-bold tracking-tight",
+      "h2": "text-2xl sm:text-3xl font-semibold tracking-tight",
+      "h3": "text-xl sm:text-2xl font-medium tracking-tight",
+      "h4": "text-lg sm:text-xl font-medium",
+      "body": "text-base leading-relaxed",
+      "small": "text-sm text-slate-500",
+      "label": "text-xs font-semibold uppercase tracking-[0.2em]"
+    }
+  },
+  "colors": {
+    "background": "#FFFFFF",
+    "surface": "#F4F5F7",
+    "surface_dark": "#0A0A0A",
+    "primary": "#194BFB",
+    "primary_hover": "#0F3AE5",
+    "secondary_accent": "#FF5500",
+    "success": "#10B981",
+    "warning": "#F59E0B",
+    "danger": "#EF4444",
+    "text_primary": "#09090B",
+    "text_secondary": "#64748B",
+    "border": "#E2E8F0"
+  },
+  "layout_and_spacing": {
+    "spacing_scale": "p-1, p-2, p-4, p-6, p-8, p-12, p-16, p-24, p-32",
+    "container_padding": "p-6 sm:p-8",
+    "border_radius": "rounded-sm (2px to 4px max) for a sharp, technical look",
+    "grid_strategy": "The Control Room Grid (dense, functional, 1px borders, rigid hierarchy). Use grid-cols-1 md:grid-cols-3 lg:grid-cols-4 for dashboard widgets.",
+    "component_style": "Grid Borders: Containers have 1px solid borders. No heavy drop shadows. Crisp edges."
+  },
+  "motion_and_interactions": {
+    "philosophy": "Minimalist and snappy. No heavy animations. Focus on clarity.",
+    "hover_states": "Subtle background color shifts, slight border color darken, crisp text color changes. Example: hover:bg-slate-100.",
+    "focus_states": "High-contrast ring. Example: focus:ring-2 focus:ring-primary focus:ring-offset-1."
+  },
+  "components": {
+    "buttons": "Sharp corners (rounded-sm), strong contrast. Primary uses Cobalt Blue bg with white text. Secondary uses transparent bg with 1px border.",
+    "cards": "Flat background (white or surface), 1px subtle border, no shadow by default. Hover adds shadow-sm and slightly darkens border.",
+    "inputs": "Shadcn defaults but override border-radius to rounded-sm. Focus state must be highly visible.",
+    "tables": "Zebra striping or crisp 1px borders between rows. Dense padding for data visibility.",
+    "navigation": "Left-sidebar for dashboard with clear active states (e.g., left border highlight or strong background tint)."
+  },
+  "icons": {
+    "library": "lucide-react",
+    "style": "Clean, line-based, scalable."
+  },
+  "images": {
+    "hero_background": {
+      "url": "https://images.pexels.com/photos/3637115/pexels-photo-3637115.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "description": "Abstract geometric architectural design in black and white with futuristic and modern elements."
+    },
+    "student_coding": {
+      "url": "https://images.unsplash.com/photo-1773966071293-bea3d7646fd1?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NjZ8MHwxfHNlYXJjaHwxfHxkZXZlbG9wZXIlMjBjb2RpbmclMjBkYXJrJTIwbW9kZSUyMGxhcHRvcHxlbnwwfHx8fDE3NzczOTU3MDh8MA&ixlib=rb-4.1.0&q=85",
+      "description": "Laptop screen displaying code and icons on dock"
+    },
+    "course_thumbnail_placeholder": {
+      "url": "https://images.pexels.com/photos/6424589/pexels-photo-6424589.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "description": "A laptop showcasing colorful code in a dark environment."
+    },
+    "avatar_placeholder": {
+      "url": "https://images.unsplash.com/photo-1770235622881-7c3b96af6972?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjd8MHwxfHNlYXJjaHwxfHxtb2Rlcm4lMjB1bml2ZXJzaXR5JTIwc3R1ZGVudCUyMHN0dWR5aW5nfGVufDB8fHx8MTc3NzM5NTcwOHww&ixlib=rb-4.1.0&q=85",
+      "description": "A young woman in a classroom with a book."
+    }
+  },
+  "accessibility": {
+    "contrast": "Ensure all text meets 4.5:1 ratio. Especially text on primary blue or accent orange.",
+    "test_ids": "All interactive elements MUST include data-testid (e.g., data-testid='login-submit-btn')"
+  },
+  "instructions_to_main_agent": [
+    "Use Outfit for all headings, IBM Plex Sans for body text, and JetBrains Mono for code snippets.",
+    "Adopt a 'Control Room' grid layout for dashboards: high density, crisp 1px borders, zero or minimal border-radius (rounded-sm max).",
+    "Avoid generic Tailwind shadows (shadow-md/lg). Rely on borders and background color contrasts (White vs #F4F5F7) for depth.",
+    "Avoid purple/violet gradients entirely. Use Cobalt Blue (#194BFB) as the primary action color and Code Green (#10B981) for success/approved states.",
+    "Do not build a frankendashboard. Ensure progressive disclosure and semantic colors for clarity.",
+    "Use lucide-react for all iconography.",
+    "Incorporate the provided unsplash/pexels URLs for placeholders and backgrounds. DO NOT use dummyimage.com or via.placeholder."
+  ]
+}
