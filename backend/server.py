@@ -16,8 +16,6 @@ from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request, Respons
 from starlette.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, EmailStr
 from supabase import create_client
-from dotenv import load_dotenv
-import os
 
 load_dotenv()
 
@@ -247,14 +245,20 @@ async def get_course(course_id: str, user: dict = Depends(get_current_user)):
     module_ids = [m["id"] for m in modules]
 
     # Batch-fetch all lessons for all modules in one query
-    all_lessons = supabase.table("lessons").select("*").in_("module_id", module_ids).order("sequence_order").execute().data
+    if module_ids:
+        all_lessons = supabase.table("lessons").select("*").in_("module_id", module_ids).order("sequence_order").execute().data
+    else:
+        all_lessons = []
     lesson_ids = [l["id"] for l in all_lessons]
     lessons_by_module = {}
     for l in all_lessons:
         lessons_by_module.setdefault(l["module_id"], []).append(l)
 
     # Batch-fetch tasks for all lessons
-    tasks_list = supabase.table("tasks").select("*").in_("lesson_id", lesson_ids).execute().data
+    if lesson_ids:
+        tasks_list = supabase.table("tasks").select("*").in_("lesson_id", lesson_ids).execute().data
+    else:
+        tasks_list = []
     task_by_lesson = {t["lesson_id"]: t for t in tasks_list}
 
     progress_by_lesson = {}
@@ -317,11 +321,16 @@ async def delete_course(course_id: str, _: dict = Depends(require_roles("admin")
     supabase.table("courses").delete().eq("id", course_id).execute()
     mods = supabase.table("modules").select("id").eq("course_id", course_id).execute().data
     mod_ids = [m["id"] for m in mods]
-    lessons = supabase.table("lessons").select("id").in_("module_id", mod_ids).execute().data
-    lesson_ids = [l["id"] for l in lessons]
-    supabase.table("modules").delete().eq("course_id", course_id).execute()
-    supabase.table("lessons").delete().in_("module_id", mod_ids).execute()
-    supabase.table("tasks").delete().in_("lesson_id", lesson_ids).execute()
+    
+    lesson_ids = []
+    if mod_ids:
+        lessons = supabase.table("lessons").select("id").in_("module_id", mod_ids).execute().data
+        lesson_ids = [l["id"] for l in lessons]
+        supabase.table("modules").delete().eq("course_id", course_id).execute()
+        supabase.table("lessons").delete().in_("module_id", mod_ids).execute()
+        
+    if lesson_ids:
+        supabase.table("tasks").delete().in_("lesson_id", lesson_ids).execute()
     return {"ok": True}
 
 
@@ -349,7 +358,8 @@ async def delete_module(module_id: str, _: dict = Depends(require_roles("admin")
     lesson_ids = [l["id"] for l in lessons]
     supabase.table("modules").delete().eq("id", module_id).execute()
     supabase.table("lessons").delete().eq("module_id", module_id).execute()
-    supabase.table("tasks").delete().in_("lesson_id", lesson_ids).execute()
+    if lesson_ids:
+        supabase.table("tasks").delete().in_("lesson_id", lesson_ids).execute()
     return {"ok": True}
 
 
@@ -514,9 +524,11 @@ async def pending_submissions(user: dict = Depends(require_roles("mentor", "admi
     # Batch-fetch students and lessons
     student_ids = list({s["student_id"] for s in subs})
     lesson_ids = list({s["lesson_id"] for s in subs})
-    students = supabase.table("users").select("*").in_("id", student_ids).execute().data
+    
+    students = supabase.table("users").select("*").in_("id", student_ids).execute().data if student_ids else []
     student_map = {st["id"]: st for st in students}
-    lessons = supabase.table("lessons").select("*").in_("id", lesson_ids).execute().data
+    
+    lessons = supabase.table("lessons").select("*").in_("id", lesson_ids).execute().data if lesson_ids else []
     lesson_map = {l["id"]: l for l in lessons}
     for s in subs:
         s["student"] = student_map.get(s["student_id"])
@@ -598,12 +610,12 @@ async def student_dashboard(user: dict = Depends(require_roles("student"))):
 
     # Batch-fetch all modules for all courses, then all lessons for those modules
     course_ids = [c["id"] for c in courses]
-    all_modules = supabase.table("modules").select("*").in_("course_id", course_ids).order("sequence_order").execute().data
+    all_modules = supabase.table("modules").select("*").in_("course_id", course_ids).order("sequence_order").execute().data if course_ids else []
     modules_by_course = {}
     for m in all_modules:
         modules_by_course.setdefault(m["course_id"], []).append(m)
     module_ids = [m["id"] for m in all_modules]
-    all_lessons = supabase.table("lessons").select("*").in_("module_id", module_ids).order("sequence_order").execute().data
+    all_lessons = supabase.table("lessons").select("*").in_("module_id", module_ids).order("sequence_order").execute().data if module_ids else []
     lessons_by_module = {}
     for l in all_lessons:
         lessons_by_module.setdefault(l["module_id"], []).append(l)
