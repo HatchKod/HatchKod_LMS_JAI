@@ -9,7 +9,7 @@ module.exports = {
       env: {
         NODE_ENV: "production",
       },
-      # Log management
+      // Log management
       out_file: "./logs/out.log",
       error_file: "./logs/error.log",
       merge_logs: true,
