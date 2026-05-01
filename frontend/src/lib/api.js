@@ -22,6 +22,14 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+api.upload = (url, file) => {
+  const formData = new FormData();
+  formData.append("file", file);
+  return api.post(url, formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+};
+
 export function formatApiError(detail) {
   if (detail == null) return "Something went wrong";
   if (typeof detail === "string") return detail;
