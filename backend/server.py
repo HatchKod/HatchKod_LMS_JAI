@@ -119,9 +119,9 @@ async def get_current_user(request: Request) -> dict:
         raise HTTPException(status_code=401, detail="Token expired")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
-    user = get_single_or_none(supabase.table("users").select("*").eq("id", payload["sub"]))
+    user = get_single_or_none(supabase.table("users").select("*").eq("id", payload["sub"]).eq("is_active", True))
     if not user:
-        raise HTTPException(status_code=401, detail="User not found")
+        raise HTTPException(status_code=401, detail="User not found or inactive")
     return user
 
 
@@ -229,9 +229,9 @@ async def register(payload: RegisterIn, response: Response, background_tasks: Ba
 @api.post("/auth/login")
 async def login(payload: LoginIn, response: Response):
     email = payload.email.lower()
-    user = get_single_or_none(supabase.table("users").select("*").eq("email", email))
+    user = get_single_or_none(supabase.table("users").select("*").eq("email", email).eq("is_active", True))
     if not user or not verify_password(payload.password, user["password_hash"]):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+        raise HTTPException(status_code=401, detail="Invalid credentials or inactive account")
     token = create_token(user["id"], user["email"], user["role"])
     set_auth_cookie(response, token)
     user.pop("password_hash", None)
@@ -650,11 +650,29 @@ async def review_submission(
 # -------------------- Users / Admin --------------------
 @api.get("/users")
 async def list_users(role: Optional[str] = None, _: dict = Depends(require_roles("admin"))):
-    query = supabase.table("users").select("*")
+    query = supabase.table("users").select("*").eq("is_active", True)
     if role:
         query = query.eq("role", role)
     users = query.execute().data
     return users
+
+
+@api.patch("/users/{user_id}/deactivate")
+async def deactivate_user(user_id: str, _: dict = Depends(require_roles("admin"))):
+    user = get_single_or_none(supabase.table("users").select("*").eq("id", user_id))
+    if not user:
+        raise HTTPException(404, "User not found")
+    
+    # Deactivate user
+    supabase.table("users").update({"is_active": False}).eq("id", user_id).execute()
+    
+    # If mentor, unassign from all students
+    if user["role"] == "mentor":
+        supabase.table("users").update({"assigned_mentor_id": None}).eq("assigned_mentor_id", user_id).execute()
+        # Update existing pending submissions to have no mentor (so they can be picked up by others)
+        supabase.table("submissions").update({"mentor_id": None}).eq("mentor_id", user_id).in_("status", ["pending", "rework"]).execute()
+        
+    return {"ok": True}
 
 
 @api.post("/users/{user_id}/assign-mentor")
@@ -770,8 +788,8 @@ async def admin_dashboard(_: dict = Depends(require_roles("admin"))):
         "courses": supabase.table("courses").select("*", count="exact").execute().count,
         "modules": supabase.table("modules").select("*", count="exact").execute().count,
         "lessons": supabase.table("lessons").select("*", count="exact").execute().count,
-        "students": supabase.table("users").select("*", count="exact").eq("role", "student").execute().count,
-        "mentors": supabase.table("users").select("*", count="exact").eq("role", "mentor").execute().count,
+        "students": supabase.table("users").select("*", count="exact").eq("role", "student").eq("is_active", True).execute().count,
+        "mentors": supabase.table("users").select("*", count="exact").eq("role", "mentor").eq("is_active", True).execute().count,
         "pending_submissions": supabase.table("submissions").select("*", count="exact").in_("status", ["pending", "rework"]).execute().count,
         "approved_submissions": supabase.table("submissions").select("*", count="exact").eq("status", "approved").execute().count,
     }

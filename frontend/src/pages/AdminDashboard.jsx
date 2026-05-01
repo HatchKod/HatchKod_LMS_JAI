@@ -12,6 +12,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogT
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Avatar, AvatarFallback } from "../components/ui/avatar";
 import { 
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../components/ui/dropdown-menu";
+import { 
   Plus, 
   Trash2, 
   FolderTree, 
@@ -22,7 +28,9 @@ import {
   Clock, 
   CheckCircle,
   UserCheck,
-  UserPlus
+  UserPlus,
+  MoreVertical,
+  UserX
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -305,6 +313,14 @@ function UsersPanel({ students, mentors, stats, refresh }) {
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
 
+  const deactivate = async (user) => {
+    if (!confirm(`Are you sure you want to deactivate ${user.name}? This cannot be undone from the app.`)) return;
+    try {
+      await api.patch(`/users/${user.id}/deactivate`);
+      toast.success("User deactivated"); refresh();
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+
   const getInitials = (name) => {
     return name?.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2) || "??";
   };
@@ -332,7 +348,7 @@ function UsersPanel({ students, mentors, stats, refresh }) {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         <Card className="rounded-xl border-slate-200 overflow-hidden bg-white shadow-sm">
-          <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
+          <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
             <div className="text-[10px] uppercase tracking-[0.2em] text-[#194BFB] font-bold">Students ({students.length})</div>
           </div>
           <div className="divide-y divide-slate-100 max-h-[600px] overflow-y-auto">
@@ -349,7 +365,7 @@ function UsersPanel({ students, mentors, stats, refresh }) {
                     <div className="text-xs text-slate-500 font-medium">{s.email}</div>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-3">
                   <Select value={s.assigned_mentor_id || ""} onValueChange={(v) => assign(s.id, v)}>
                     <SelectTrigger className="h-8 w-40 text-[11px] rounded-md bg-white border-slate-200 group-hover:border-[#194BFB]/30 transition-colors" data-testid={`admin-assign-select-${s.id}`}>
                       <SelectValue placeholder="Assign mentor" />
@@ -357,11 +373,25 @@ function UsersPanel({ students, mentors, stats, refresh }) {
                     <SelectContent>
                       {mentors.map((m) => (
                         <SelectItem key={m.id} value={m.id} className="text-xs">
-                          {m.name} ({mentorStats[m.id] || 0})
+                          {m.name}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
+                  
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-slate-600">
+                        <MoreVertical className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-40">
+                      <DropdownMenuItem onClick={() => deactivate(s)} className="text-red-600 focus:text-red-600 focus:bg-red-50 cursor-pointer">
+                        <UserX className="mr-2 h-4 w-4" />
+                        Deactivate
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </div>
             ))}
@@ -370,26 +400,42 @@ function UsersPanel({ students, mentors, stats, refresh }) {
         </Card>
 
         <Card className="rounded-xl border-slate-200 overflow-hidden bg-white shadow-sm">
-          <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
+          <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
             <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500 font-bold">Mentors ({mentors.length})</div>
           </div>
           <div className="divide-y divide-slate-100 max-h-[600px] overflow-y-auto">
             {mentors.map((m) => (
-              <div key={m.id} className="px-6 py-5 flex items-center gap-4 hover:bg-slate-50 transition-colors" data-testid={`admin-mentor-row-${m.id}`}>
-                <Avatar className="h-10 w-10 border-2 border-white shadow-sm">
-                  <AvatarFallback className="bg-slate-900 text-white text-xs font-bold">
-                    {getInitials(m.name)}
-                  </AvatarFallback>
-                </Avatar>
-                <div>
-                  <div className="font-bold text-slate-900 leading-tight flex items-center gap-2">
-                    {m.name}
-                    <span className="px-1.5 py-0.5 rounded-full bg-blue-50 text-[9px] text-blue-600 font-bold border border-blue-100">
-                      {mentorStats[m.id] || 0} Students
-                    </span>
+              <div key={m.id} className="px-6 py-5 flex items-center justify-between gap-4 hover:bg-slate-50 transition-colors group" data-testid={`admin-mentor-row-${m.id}`}>
+                <div className="flex items-center gap-4">
+                  <Avatar className="h-10 w-10 border-2 border-white shadow-sm">
+                    <AvatarFallback className="bg-slate-900 text-white text-xs font-bold">
+                      {getInitials(m.name)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div>
+                    <div className="font-bold text-slate-900 leading-tight flex items-center gap-2">
+                      {m.name}
+                      <span className="px-1.5 py-0.5 rounded-full bg-blue-50 text-[9px] text-blue-600 font-bold border border-blue-100">
+                        {mentorStats[m.id] || 0} Students
+                      </span>
+                    </div>
+                    <div className="text-xs text-slate-500 font-medium">{m.email}</div>
                   </div>
-                  <div className="text-xs text-slate-500 font-medium">{m.email}</div>
                 </div>
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-slate-600">
+                      <MoreVertical className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-40">
+                    <DropdownMenuItem onClick={() => deactivate(m)} className="text-red-600 focus:text-red-600 focus:bg-red-50 cursor-pointer">
+                      <UserX className="mr-2 h-4 w-4" />
+                      Deactivate
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             ))}
             {mentors.length === 0 && <div className="p-12 text-center text-slate-400 text-sm italic">No mentors registered yet.</div>}
