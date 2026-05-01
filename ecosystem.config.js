@@ -2,10 +2,10 @@ module.exports = {
   apps: [
     {
       name: "hatchkod-backend",
-      script: "python3",
+      script: "venv/bin/python",
       args: "-m uvicorn server:app --host 127.0.0.1 --port 8000",
       cwd: "./backend",
-      interpreter: "python3",
+      interpreter: "none", // Using the direct path in 'script'
       env: {
         NODE_ENV: "production",
       },
