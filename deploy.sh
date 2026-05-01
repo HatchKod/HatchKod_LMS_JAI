@@ -42,8 +42,23 @@ cd ..
 
 # 5. Nginx Configuration
 echo -e "${BLUE}Configuring Nginx...${NC}"
+# Get the absolute path of the current directory
+PROJECT_PATH=$(pwd)
+
+# Create a temporary config with the correct paths
+sed "s|/var/www/hatchkod|$PROJECT_PATH|g" nginx.conf > hatchkod.conf.tmp
+
 # In Amazon Linux 2023, the default is to use /etc/nginx/conf.d/
-sudo cp nginx.conf /etc/nginx/conf.d/hatchkod.conf
+sudo cp hatchkod.conf.tmp /etc/nginx/conf.d/hatchkod.conf
+rm hatchkod.conf.tmp
+
+# Permissions: Grant Nginx access to the home directory (if applicable)
+# This is required because Nginx runs as a separate user.
+chmod 755 $PROJECT_PATH
+chmod 755 $PROJECT_PATH/frontend
+chmod 755 $PROJECT_PATH/frontend/build
+# Also ensure the parent home directory is traversable
+chmod +x /home/ec2-user
 
 # Check if default nginx config might conflict (port 80)
 if [ -f "/etc/nginx/nginx.conf" ]; then
