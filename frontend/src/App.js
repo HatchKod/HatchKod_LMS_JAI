@@ -44,7 +44,7 @@ export default function App() {
               } />
             </Routes>
           </BrowserRouter>
-          <Toaster richColors position="top-right" />
+          <Toaster richColors position="top-right" closeButton />
         </AuthProvider>
       </TooltipProvider>
     </div>

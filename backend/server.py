@@ -13,7 +13,8 @@ from typing import List, Optional, Literal
 
 import bcrypt
 import jwt
-from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request, Response
+import requests
+from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request, Response, BackgroundTasks
 from starlette.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, EmailStr
 from supabase import create_client
@@ -64,6 +65,22 @@ def verify_password(pw: str, hashed: str) -> bool:
         return bcrypt.checkpw(pw.encode(), hashed.encode())
     except Exception:
         return False
+
+
+def call_onboarding_lambda(name: str, email: str, password: str):
+    url = "https://9vsd5hlgu3.execute-api.ap-south-1.amazonaws.com/Dev/onboard_student"
+    payload = {
+        "name": name,
+        "email": email,
+        "password": password
+    }
+    try:
+        logger.info(f"Calling onboarding Lambda for {email}")
+        resp = requests.post(url, json=payload, timeout=10)
+        resp.raise_for_status()
+        logger.info(f"Onboarding Lambda success for {email}")
+    except Exception as e:
+        logger.error(f"Onboarding Lambda failed for {email}: {e}")
 
 
 def create_token(user_id: str, email: str, role: str) -> str:
@@ -179,9 +196,14 @@ class CourseStatusIn(BaseModel):
     status: Literal["draft", "published", "inactive"]
 
 
+class UpdatePasswordIn(BaseModel):
+    new_password: str = Field(min_length=6)
+    confirm_password: str = Field(min_length=6)
+
+
 # -------------------- Auth Endpoints --------------------
 @api.post("/auth/register")
-async def register(payload: RegisterIn, response: Response):
+async def register(payload: RegisterIn, response: Response, background_tasks: BackgroundTasks):
     email = payload.email.lower()
     existing = supabase.table("users").select("id").eq("email", email).execute()
     if existing.data:
@@ -197,6 +219,7 @@ async def register(payload: RegisterIn, response: Response):
         "created_at": iso(now_utc()),
     }
     supabase.table("users").insert(user_doc).execute()
+    background_tasks.add_task(call_onboarding_lambda, payload.name, email, payload.password)
     token = create_token(user_id, email, payload.role)
     set_auth_cookie(response, token)
     user_doc.pop("password_hash", None)
@@ -224,6 +247,18 @@ async def logout(response: Response):
 @api.get("/auth/me")
 async def me(user: dict = Depends(get_current_user)):
     return user
+
+
+@api.post("/auth/update-password")
+async def update_password(payload: UpdatePasswordIn, user: dict = Depends(get_current_user)):
+    if payload.new_password != payload.confirm_password:
+        raise HTTPException(status_code=400, detail="Passwords do not match")
+    
+    supabase.table("users").update({
+        "password_hash": hash_password(payload.new_password)
+    }).eq("id", user["id"]).execute()
+    
+    return {"ok": True, "message": "Password updated successfully"}
 
 
 # -------------------- Courses (Admin) --------------------
@@ -637,7 +672,7 @@ async def assign_mentor(user_id: str, payload: AssignMentorIn, _: dict = Depends
 
 
 @api.post("/admin/users")
-async def admin_create_user(payload: AdminUserIn, _: dict = Depends(require_roles("admin"))):
+async def admin_create_user(payload: AdminUserIn, _: dict = Depends(require_roles("admin")), background_tasks: BackgroundTasks = None):
     email = payload.email.lower()
     existing = supabase.table("users").select("id").eq("email", email).execute()
     if existing.data:
@@ -653,6 +688,8 @@ async def admin_create_user(payload: AdminUserIn, _: dict = Depends(require_role
         "created_at": iso(now_utc()),
     }
     supabase.table("users").insert(user_doc).execute()
+    if background_tasks:
+        background_tasks.add_task(call_onboarding_lambda, payload.name, email, payload.password)
     user_doc.pop("password_hash", None)
     return user_doc
 

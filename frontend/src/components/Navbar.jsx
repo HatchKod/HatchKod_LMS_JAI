@@ -1,52 +1,217 @@
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useLocation } from "react-router-dom";
+import { useState } from "react";
 import { useAuth } from "../lib/auth";
-import { Button } from "../components/ui/button";
-import { LogOut, LayoutDashboard, GraduationCap } from "lucide-react";
+import { api, formatApiError } from "../lib/api";
+import { Button } from "./ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "./ui/dialog";
+import { Input } from "./ui/input";
+import { Label } from "./ui/label";
+import { Avatar, AvatarFallback } from "./ui/avatar";
+import { 
+  LogOut, 
+  LayoutDashboard, 
+  ChevronDown, 
+  KeyRound, 
+  HelpCircle,
+  MessageCircle,
+  Mail
+} from "lucide-react";
+import { toast } from "sonner";
 
 export default function Navbar() {
   const { user, logout } = useAuth();
   const nav = useNavigate();
-  const handleLogout = async () => { await logout(); nav("/login"); };
+  const location = useLocation();
+  const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
+  const [passData, setPassData] = useState({ new_password: "", confirm_password: "" });
+  const [isUpdating, setIsUpdating] = useState(false);
+
+  const handleLogout = async () => {
+    await logout();
+    nav("/login");
+  };
 
   const dashHref =
     user?.role === "admin" ? "/admin" : user?.role === "mentor" ? "/mentor" : "/dashboard";
 
+  const getInitials = (name) => {
+    if (!name) return "??";
+    return name
+      .split(" ")
+      .map((n) => n[0])
+      .join("")
+      .toUpperCase()
+      .slice(0, 2);
+  };
+
+  const handleUpdatePassword = async (e) => {
+    e.preventDefault();
+    if (passData.new_password !== passData.confirm_password) {
+      toast.error("Passwords do not match");
+      return;
+    }
+    setIsUpdating(true);
+    try {
+      await api.post("/auth/update-password", passData);
+      toast.success("Password updated successfully");
+      setIsPasswordModalOpen(false);
+      setPassData({ new_password: "", confirm_password: "" });
+    } catch (err) {
+      toast.error(formatApiError(err.response?.data?.detail));
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  const isActive = (path) => location.pathname === path;
+
   return (
     <header className="sticky top-0 z-40 w-full border-b border-border bg-white" data-testid="navbar">
-      <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 sm:px-6">
-        <Link to={user ? dashHref : "/"} className="flex items-center gap-2" data-testid="brand-link">
-          <img src="/logo.png" alt="HatchKod" className="h-10 w-auto object-contain" />
-          <span className="font-[Outfit] text-lg font-bold tracking-tight">HatchKod</span>
-          <span className="hidden rounded-sm border border-border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-slate-500 sm:inline">
-            LMS
-          </span>
-        </Link>
-        <nav className="flex items-center gap-2">
+      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">
+        <div className="flex items-center gap-8">
+          <Link to={user ? dashHref : "/"} className="flex items-center gap-2" data-testid="brand-link">
+            <img src="/logo.png" alt="HatchKod" className="h-10 w-auto object-contain" />
+            <span className="font-[Outfit] text-lg font-bold tracking-tight">HatchKod</span>
+          </Link>
+
+          {user && (
+            <nav className="hidden md:flex items-center gap-1">
+              <Link
+                to={dashHref}
+                className={`flex items-center gap-2 px-3 py-2 text-sm font-medium transition-colors rounded-md ${
+                  isActive(dashHref)
+                    ? "text-[#194BFB] bg-[#194BFB]/5"
+                    : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
+                }`}
+                data-testid="nav-dashboard-link"
+              >
+                <LayoutDashboard className="h-4 w-4" />
+                Dashboard
+                {isActive(dashHref) && (
+                  <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#194BFB]" />
+                )}
+              </Link>
+            </nav>
+          )}
+        </div>
+
+        <div className="flex items-center gap-4">
           {user ? (
-            <>
-              <span className="hidden text-xs uppercase tracking-widest text-slate-500 sm:inline" data-testid="user-role-badge">
-                {user.role}
-              </span>
-              <span className="hidden text-sm text-slate-700 sm:inline" data-testid="user-name">{user.name}</span>
-              <Button asChild size="sm" variant="outline" className="rounded-sm" data-testid="nav-dashboard-btn">
-                <Link to={dashHref}><LayoutDashboard className="mr-1.5 h-4 w-4" />Dashboard</Link>
-              </Button>
-              <Button size="sm" variant="ghost" onClick={handleLogout} className="rounded-sm" data-testid="nav-logout-btn">
-                <LogOut className="mr-1.5 h-4 w-4" />Logout
-              </Button>
-            </>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="flex items-center gap-2 p-1 rounded-full hover:bg-slate-50 transition-colors outline-none group">
+                  <Avatar className="h-8 w-8 border border-border">
+                    <AvatarFallback className="bg-[#194BFB] text-white text-xs font-bold">
+                      {getInitials(user.name)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <span className="hidden sm:inline text-sm font-medium text-slate-700 group-hover:text-slate-900">
+                    {user.name}
+                  </span>
+                  <ChevronDown className="h-4 w-4 text-slate-400 group-hover:text-slate-600 transition-transform duration-200" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56 mt-1">
+                <DropdownMenuLabel className="font-normal">
+                  <div className="flex flex-col space-y-1">
+                    <p className="text-sm font-medium leading-none">{user.name}</p>
+                    <p className="text-xs leading-none text-muted-foreground">{user.email}</p>
+                  </div>
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => setIsPasswordModalOpen(true)} className="cursor-pointer">
+                  <KeyRound className="mr-2 h-4 w-4" />
+                  <span>Change Password</span>
+                </DropdownMenuItem>
+                
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel className="text-xs font-semibold text-slate-400 uppercase tracking-wider px-2 py-1.5">
+                  Support
+                </DropdownMenuLabel>
+                <div className="px-2 py-1.5 space-y-2">
+                  <div className="flex items-center gap-2 text-xs text-slate-600">
+                    <Mail className="h-3.5 w-3.5" />
+                    <span>support@hatchkod.in</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-slate-600">
+                    <MessageCircle className="h-3.5 w-3.5" />
+                    <span>+91 97048 97596</span>
+                  </div>
+                </div>
+
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={handleLogout} className="cursor-pointer text-red-600 focus:text-red-600 focus:bg-red-50">
+                  <LogOut className="mr-2 h-4 w-4" />
+                  <span>Logout</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           ) : (
-            <>
-              <Button asChild size="sm" variant="ghost" className="rounded-sm" data-testid="nav-login-btn">
+            <div className="flex items-center gap-2">
+              <Button asChild size="sm" variant="ghost" className="rounded-sm">
                 <Link to="/login">Login</Link>
               </Button>
-              <Button asChild size="sm" className="rounded-sm bg-[#194BFB] hover:bg-[#0F3AE5]" data-testid="nav-register-btn">
+              <Button asChild size="sm" className="rounded-sm bg-[#194BFB] hover:bg-[#0F3AE5]">
                 <Link to="/register">Get Started</Link>
               </Button>
-            </>
+            </div>
           )}
-        </nav>
+        </div>
       </div>
+
+      <Dialog open={isPasswordModalOpen} onOpenChange={setIsPasswordModalOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Update Password</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleUpdatePassword} className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="new_password">New Password</Label>
+              <Input
+                id="new_password"
+                type="password"
+                required
+                value={passData.new_password}
+                onChange={(e) => setPassData({ ...passData, new_password: e.target.value })}
+                placeholder="••••••••"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="confirm_password">Confirm New Password</Label>
+              <Input
+                id="confirm_password"
+                type="password"
+                required
+                value={passData.confirm_password}
+                onChange={(e) => setPassData({ ...passData, confirm_password: e.target.value })}
+                placeholder="••••••••"
+              />
+            </div>
+            <DialogFooter className="pt-4">
+              <Button type="button" variant="outline" onClick={() => setIsPasswordModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={isUpdating} className="bg-[#194BFB] hover:bg-[#0F3AE5]">
+                {isUpdating ? "Updating..." : "Update Password"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </header>
   );
 }
