@@ -13,6 +13,7 @@ import LessonView from "./pages/LessonView";
 import MentorDashboard from "./pages/MentorDashboard";
 import AdminDashboard from "./pages/AdminDashboard";
 import AdminCourseEditor from "./pages/AdminCourseEditor";
+import PlaygroundPage from "./pages/PlaygroundPage";
 
 export default function App() {
   return (
@@ -41,6 +42,9 @@ export default function App() {
               } />
               <Route path="/admin/course/:id" element={
                 <ProtectedRoute roles={["admin"]}><AdminCourseEditor /></ProtectedRoute>
+              } />
+              <Route path="/playground" element={
+                <ProtectedRoute><PlaygroundPage /></ProtectedRoute>
               } />
             </Routes>
           </BrowserRouter>

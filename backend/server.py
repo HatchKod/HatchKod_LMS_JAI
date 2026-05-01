@@ -14,6 +14,7 @@ from typing import List, Optional, Literal
 import bcrypt
 import jwt
 import requests
+import httpx
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request, Response, BackgroundTasks
 from starlette.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, EmailStr
@@ -809,6 +810,47 @@ async def admin_dashboard(_: dict = Depends(require_roles("admin"))):
         "pending_submissions": supabase.table("submissions").select("*", count="exact").in_("status", ["pending", "rework"]).execute().count,
         "approved_submissions": supabase.table("submissions").select("*", count="exact").eq("status", "approved").execute().count,
     }
+
+
+class ExecuteIn(BaseModel):
+    code: str
+    stdin: str = ""
+
+
+@app.post("/api/execute")
+async def execute_code(payload: ExecuteIn):
+    client_id = os.getenv("JDOODLE_CLIENT_ID")
+    client_secret = os.getenv("JDOODLE_CLIENT_SECRET")
+    
+    if not payload.code.strip():
+        raise HTTPException(status_code=400, detail="Code cannot be empty")
+
+    async with httpx.AsyncClient() as client:
+        try:
+            res = await client.post("https://api.jdoodle.com/v1/execute", json={
+                "clientId": client_id,
+                "clientSecret": client_secret,
+                "script": payload.code,
+                "stdin": payload.stdin,
+                "language": "java",
+                "versionIndex": "4"
+            }, timeout=30.0)
+            
+            if res.status_code != 200:
+                logger.error(f"JDoodle API error {res.status_code}: {res.text}")
+                raise HTTPException(status_code=res.status_code, detail="Execution engine error")
+            
+            data = res.json()
+            return {
+                "output": data.get("output", ""),
+                "cpuTime": data.get("cpuTime", "0"),
+                "memory": data.get("memory", "0")
+            }
+        except httpx.TimeoutException:
+            raise HTTPException(status_code=504, detail="Execution timed out. Check for infinite loops or missing input.")
+        except Exception as e:
+            logger.error(f"Proxy error: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
 
 
 @api.get("/")

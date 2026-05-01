@@ -75,3 +75,5 @@ The frontend is built with React.
    - **Admin Login:** `admin@hatchkod.com` | `secure_admin_password` (or whatever you set in `.env`)
    - **Student Login:** `student@hatchkod.com` | `student123`
    - **Mentor Login:** `mentor@hatchkod.com` | `mentor123`
+
+# npm install @monaco-editor/react

@@ -28,7 +28,8 @@ import {
   KeyRound, 
   HelpCircle,
   MessageCircle,
-  Mail
+  Mail,
+  Code2
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -101,9 +102,17 @@ export default function Navbar() {
               >
                 <LayoutDashboard className="h-4 w-4" />
                 Dashboard
-                {isActive(dashHref) && (
-                  <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#194BFB]" />
-                )}
+              </Link>
+              <Link
+                to="/playground"
+                className={`flex items-center gap-2 px-3 py-2 text-sm font-medium transition-colors rounded-md ${
+                  isActive("/playground")
+                    ? "text-[#194BFB] bg-[#194BFB]/5"
+                    : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
+                }`}
+              >
+                <Code2 className="h-4 w-4" />
+                Playground
               </Link>
             </nav>
           )}
