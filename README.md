@@ -76,4 +76,18 @@ The frontend is built with React.
    - **Student Login:** `student@hatchkod.com` | `student123`
    - **Mentor Login:** `mentor@hatchkod.com` | `mentor123`
 
-# npm install @monaco-editor/react
+## Maintenance
+
+### Updating Code
+Whenever you pull the latest code from Git, ensure you sync your dependencies to avoid compilation errors:
+
+1. **Frontend Dependencies**:
+   ```bash
+   cd frontend
+   npm install
+   ```
+2. **Backend Dependencies**:
+   ```bash
+   cd backend
+   pip install -r requirements.txt
+   ```
