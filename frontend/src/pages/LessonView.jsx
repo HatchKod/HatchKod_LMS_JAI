@@ -7,7 +7,7 @@ import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
 import { Label } from "../components/ui/label";
-import { ArrowLeft, Github } from "lucide-react";
+import { ArrowLeft, Github, FileUp, Link2 } from "lucide-react";
 import StatusPill from "../components/StatusPill";
 import { toast } from "sonner";
 import { useAuth } from "../lib/auth";
@@ -22,6 +22,8 @@ export default function LessonView() {
   const [busy, setBusy] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [submissionError, setSubmissionError] = useState("");
+  const [file, setFile] = useState(null);
+  const [submissionType, setSubmissionType] = useState("link");
 
   const load = async () => {
     setError("");
@@ -29,8 +31,15 @@ export default function LessonView() {
       const res = await api.get(`/lessons/${id}`);
       setData(res.data);
       if (res.data.submission) {
-        setUrl(res.data.submission.submission_url || "");
+        const sUrl = res.data.submission.submission_url || "";
+        setUrl(sUrl);
         setText(res.data.submission.submission_text || "");
+        // Auto-detect submission type
+        if (sUrl.includes("/storage/v1/object/public/submissions/")) {
+          setSubmissionType("file");
+        } else {
+          setSubmissionType("link");
+        }
       }
     } catch (e) {
       setError(formatApiError(e.response?.data?.detail) || "Failed to load lesson");
@@ -39,16 +48,54 @@ export default function LessonView() {
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [id]);
 
+  const handleFileChange = (e) => {
+    const selected = e.target.files[0];
+    if (!selected) return;
+    const allowed = [".pdf", ".zip"];
+    const ext = selected.name.slice(selected.name.lastIndexOf(".")).toLowerCase();
+    if (!allowed.includes(ext)) {
+      setSubmissionError("File type not supported. Only PDF and ZIP are allowed.");
+      e.target.value = "";
+      return;
+    }
+    if (selected.size > 10 * 1024 * 1024) {
+      setSubmissionError("File size exceeds limit (10MB).");
+      e.target.value = "";
+      return;
+    }
+    setFile(selected);
+    setSubmissionError("");
+  };
+
   const submit = async (e) => {
     e.preventDefault();
     setSubmissionError("");
-    if (!url && !text) { setSubmissionError("Add a GitHub link or text"); return; }
+    
+    let finalUrl = url;
+    if (submissionType === "file") {
+      if (!file && !submission) { setSubmissionError("Please select a file"); return; }
+      if (file) {
+        setBusy(true);
+        try {
+          const res = await api.upload("/submissions/upload", file);
+          finalUrl = res.data.url;
+        } catch (err) {
+          setSubmissionError(formatApiError(err.response?.data?.detail) || "Upload failed");
+          setBusy(false);
+          return;
+        }
+      }
+    } else {
+      if (!url) { setSubmissionError("Add a GitHub link"); return; }
+    }
+
     setBusy(true);
     try {
-      await api.post(`/lessons/${id}/submit`, { submission_url: url, submission_text: text });
+      await api.post(`/lessons/${id}/submit`, { submission_url: finalUrl, submission_text: text });
       toast.success("Submitted! Mentor will review shortly.");
       setIsEditing(false);
       setSubmissionError("");
+      setFile(null);
       await load();
     } catch (e) {
       setSubmissionError(formatApiError(e.response?.data?.detail) || "Submission failed");
@@ -170,16 +217,78 @@ export default function LessonView() {
                 </div>
               )}
 
-              {isStudent && (
-                <form onSubmit={submit} className="space-y-3 border-t border-border pt-4" data-testid="submission-form">
-                  <div className="space-y-1.5">
-                    <Label className="text-xs uppercase tracking-wider flex items-center gap-1.5">
-                      <Github className="h-3 w-3" />GitHub URL <span className="text-red-500">*</span>
-                    </Label>
-                    <Input value={url} onChange={(e) => { setUrl(e.target.value); setSubmissionError(""); }} placeholder="https://github.com/you/repo"
-                      className="rounded-sm font-mono text-sm" disabled={!canResubmit} data-testid="submission-url-input" />
-                    {submissionError && <div className="text-[11px] text-red-600 mt-1" data-testid="submission-error-msg">{submissionError}</div>}
+              {submission && (
+                <div className="bg-[#F8FAFC] border border-border rounded-sm p-4">
+                  <div className="text-[10px] uppercase tracking-[0.22em] text-slate-500 mb-3">Your Current Submission</div>
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="h-8 w-8 rounded-sm bg-white border border-border flex items-center justify-center shrink-0">
+                        {submission.submission_url.includes("/storage/v1/object/public/submissions/") ? (
+                          <FileUp className="h-4 w-4 text-[#194BFB]" />
+                        ) : (
+                          <Github className="h-4 w-4 text-[#194BFB]" />
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-xs text-slate-500 mb-0.5">{submission.submission_url.includes("/storage/v1/object/public/submissions/") ? "Uploaded File" : "GitHub Repository"}</div>
+                        <a href={submission.submission_url} target="_blank" rel="noreferrer" 
+                          className="text-sm font-semibold text-[#194BFB] hover:underline truncate block">
+                          {submission.submission_url.split('/').pop()}
+                        </a>
+                      </div>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <StatusPill status={submission.status} />
+                      <div className="text-[10px] text-slate-400 mt-1 font-mono uppercase">
+                        {new Date(submission.submitted_at).toLocaleDateString()}
+                      </div>
+                    </div>
                   </div>
+                </div>
+              )}
+
+              {isStudent && (
+                <form onSubmit={submit} className="space-y-4 border-t border-border pt-4" data-testid="submission-form">
+                  <div className="flex gap-2 mb-2">
+                    <Button type="button" variant={submissionType === "link" ? "default" : "outline"} size="sm" 
+                      className="rounded-sm text-[10px] h-7 px-3 uppercase tracking-wider" 
+                      onClick={() => { 
+                        setSubmissionType("link"); 
+                        setSubmissionError(""); 
+                        if (url.includes("/storage/v1/object/public/submissions/")) setUrl("");
+                      }}>
+                      <Link2 className="mr-1.5 h-3 w-3" /> GitHub Link
+                    </Button>
+                    <Button type="button" variant={submissionType === "file" ? "default" : "outline"} size="sm"
+                      className="rounded-sm text-[10px] h-7 px-3 uppercase tracking-wider" 
+                      onClick={() => { 
+                        setSubmissionType("file"); 
+                        setSubmissionError(""); 
+                        if (url && !url.includes("/storage/v1/object/public/submissions/")) setUrl("");
+                      }}>
+                      <FileUp className="mr-1.5 h-3 w-3" /> File Upload
+                    </Button>
+                  </div>
+
+                  {submissionType === "link" ? (
+                    <div className="space-y-1.5">
+                      <Label className="text-[10px] uppercase tracking-wider flex items-center gap-1.5 text-slate-500">
+                        <Github className="h-3 w-3" /> GitHub URL <span className="text-red-500">*</span>
+                      </Label>
+                      <Input value={url} onChange={(e) => { setUrl(e.target.value); setSubmissionError(""); }} placeholder="https://github.com/you/repo"
+                        className="rounded-sm font-mono text-sm" disabled={!canResubmit} data-testid="submission-url-input" />
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      <Label className="text-[10px] uppercase tracking-wider flex items-center gap-1.5 text-slate-500">
+                        <FileUp className="h-3 w-3" /> PDF or ZIP File <span className="text-red-500">*</span>
+                      </Label>
+                      <Input type="file" onChange={handleFileChange} accept=".pdf,.zip"
+                        className="rounded-sm text-sm file:mr-4 file:py-1 file:px-3 file:rounded-sm file:border-0 file:text-xs file:font-semibold file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200" 
+                        disabled={!canResubmit} data-testid="submission-file-input" />
+                    </div>
+                  )}
+                  {submissionError && <div className="text-[11px] text-red-600 mt-1" data-testid="submission-error-msg">{submissionError}</div>}
                   <div className="space-y-1.5">
                     <Label className="text-xs uppercase tracking-wider">Notes (optional)</Label>
                     <Textarea value={text} onChange={(e) => setText(e.target.value)} rows={3}

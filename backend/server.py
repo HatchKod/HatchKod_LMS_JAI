@@ -14,7 +14,7 @@ from typing import List, Optional, Literal
 import bcrypt
 import jwt
 import requests
-from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request, Response, BackgroundTasks
+from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request, Response, BackgroundTasks, File, UploadFile
 from starlette.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, EmailStr
 from supabase import create_client
@@ -524,6 +524,32 @@ async def is_lesson_unlocked(student_id: str, lesson_id: str) -> bool:
 
 
 # -------------------- Submissions --------------------
+@api.post("/submissions/upload")
+async def upload_submission_file(file: UploadFile = File(...), user: dict = Depends(require_roles("student"))):
+    # Validation: File type
+    allowed_extensions = {".pdf", ".zip"}
+    ext = Path(file.filename).suffix.lower()
+    if ext not in allowed_extensions:
+        raise HTTPException(status_code=400, detail="File type not supported. Only PDF and ZIP are allowed.")
+    
+    # Validation: File size (10MB)
+    MAX_SIZE = 10 * 1024 * 1024
+    content = await file.read()
+    if len(content) > MAX_SIZE:
+        raise HTTPException(status_code=400, detail="File size exceeds limit (10MB).")
+    
+    # Upload to Supabase Storage
+    file_path = f"{user['id']}/{uuid.uuid4()}{ext}"
+    try:
+        supabase.storage.from_('submissions').upload(file_path, content, file_options={"content-type": file.content_type})
+        # Generate public URL
+        public_url = f"{SUPABASE_URL}/storage/v1/object/public/submissions/{file_path}"
+        return {"url": public_url}
+    except Exception as e:
+        logger.error(f"File upload failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to upload file to storage.")
+
+
 @api.post("/lessons/{lesson_id}/submit")
 async def submit_task(lesson_id: str, payload: SubmissionIn, user: dict = Depends(require_roles("student"))):
     task = get_single_or_none(supabase.table("tasks").select("*").eq("lesson_id", lesson_id))
@@ -535,10 +561,12 @@ async def submit_task(lesson_id: str, payload: SubmissionIn, user: dict = Depend
         raise HTTPException(400, "Provide GitHub link or text")
 
     if payload.submission_url:
-        # Simple regex for github URL: https://github.com/username/repo
         github_regex = r"^https?://(www\.)?github\.com/[\w.-]+/[\w.-]+/?.*$"
-        if not re.match(github_regex, payload.submission_url):
-            raise HTTPException(400, "Invalid GitHub URL format")
+        is_github = re.match(github_regex, payload.submission_url)
+        is_storage = "/storage/v1/object/public/submissions/" in payload.submission_url
+        
+        if not (is_github or is_storage):
+            raise HTTPException(400, "Invalid submission format. Provide a GitHub URL or upload a file.")
 
     # If a previous submission is in 'rework' or 'pending', overwrite it; else create new
     existing = supabase.table("submissions").select("*").eq("student_id", user["id"]).eq("lesson_id", lesson_id).order("submitted_at", desc=True).limit(1).execute().data
