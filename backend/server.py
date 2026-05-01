@@ -547,8 +547,8 @@ async def upload_submission_file(file: UploadFile = File(...), user: dict = Depe
         public_url = f"{SUPABASE_URL}/storage/v1/object/public/submissions/{file_path}"
         return {"url": public_url}
     except Exception as e:
-        logger.error(f"File upload failed: {e}")
-        raise HTTPException(status_code=500, detail="Failed to upload file to storage.")
+        logger.error(f"File upload failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to upload file to storage: {str(e)}")
 
 
 @api.post("/lessons/{lesson_id}/submit")
