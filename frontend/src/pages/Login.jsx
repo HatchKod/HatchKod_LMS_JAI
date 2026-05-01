@@ -57,10 +57,12 @@ export default function Login() {
             <Button type="submit" disabled={busy} className="w-full rounded-sm bg-[#194BFB] hover:bg-[#0F3AE5]" data-testid="login-submit-btn">
               {busy ? "Signing in…" : "Sign in"}
             </Button>
+            {/* 
             <div className="text-sm text-slate-600 text-center">
               No account?{" "}
               <Link to="/register" className="text-[#194BFB] underline" data-testid="login-register-link">Create one</Link>
             </div>
+            */}
           </form>
         </Card>
 

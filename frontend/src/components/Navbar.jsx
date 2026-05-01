@@ -162,11 +162,8 @@ export default function Navbar() {
             </DropdownMenu>
           ) : (
             <div className="flex items-center gap-2">
-              <Button asChild size="sm" variant="ghost" className="rounded-sm">
-                <Link to="/login">Login</Link>
-              </Button>
               <Button asChild size="sm" className="rounded-sm bg-[#194BFB] hover:bg-[#0F3AE5]">
-                <Link to="/register">Get Started</Link>
+                <Link to="/login">Login</Link>
               </Button>
             </div>
           )}

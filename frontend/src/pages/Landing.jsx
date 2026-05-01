@@ -24,11 +24,8 @@ export default function Landing() {
               push to GitHub, get mentor approval, then unlock the next lesson. No skipping ahead.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
-              <Button asChild size="lg" className="rounded-sm bg-[#194BFB] hover:bg-[#0F3AE5]" data-testid="hero-cta-start">
-                <Link to="/register">Start Learning <ArrowRight className="ml-2 h-4 w-4" /></Link>
-              </Button>
-              <Button asChild size="lg" variant="outline" className="rounded-sm" data-testid="hero-cta-login">
-                <Link to="/login">I already have an account</Link>
+              <Button asChild size="lg" className="rounded-sm bg-[#194BFB] hover:bg-[#0F3AE5]" data-testid="hero-cta-login">
+                <Link to="/login">Sign In <ArrowRight className="ml-2 h-4 w-4" /></Link>
               </Button>
             </div>
             <div className="mt-12 grid grid-cols-2 sm:grid-cols-4 gap-px bg-border border border-border">
