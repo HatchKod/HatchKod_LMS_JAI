@@ -112,7 +112,7 @@ export default function Navbar() {
                 }`}
               >
                 <Code2 className="h-4 w-4" />
-                Playground
+                Codepad
               </Link>
               <Link
                 to="/problems"
@@ -123,7 +123,7 @@ export default function Navbar() {
                 }`}
               >
                 <HelpCircle className="h-4 w-4" />
-                Problems
+                Challenges
               </Link>
               {user.role === "admin" && (
                 <Link
@@ -135,7 +135,7 @@ export default function Navbar() {
                   }`}
                 >
                   <Code2 className="h-4 w-4" />
-                  Problem Management
+                  Challenge Management
                 </Link>
               )}
             </nav>
