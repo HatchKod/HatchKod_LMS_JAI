@@ -38,6 +38,15 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 app = FastAPI(title="HatchKod LMS")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, specify origins like ["http://localhost:3000"]
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 api = APIRouter(prefix="/api")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -200,6 +209,27 @@ class CourseStatusIn(BaseModel):
 class UpdatePasswordIn(BaseModel):
     new_password: str = Field(min_length=6)
     confirm_password: str = Field(min_length=6)
+
+
+class TestCaseIn(BaseModel):
+    input: str
+    expected_output: str
+    is_sample: bool = False
+    order_index: int = 0
+
+
+class ProblemIn(BaseModel):
+    title: str
+    description: str
+    difficulty: Literal["Easy", "Medium", "Hard"]
+    tags: List[str] = []
+    time_limit_seconds: int = 5
+    test_cases: List[TestCaseIn]
+
+
+class ProblemSubmitIn(BaseModel):
+    code: str
+    language: str = "java"
 
 
 # -------------------- Auth Endpoints --------------------
@@ -879,6 +909,218 @@ async def execute_code(payload: ExecuteIn):
         except Exception as e:
             logger.error(f"Proxy error: {e}")
             raise HTTPException(status_code=500, detail=str(e))
+
+
+# -------------------- Problem Library --------------------
+@api.get("/problems")
+async def list_problems(user: dict = Depends(get_current_user)):
+    problems = supabase.table("problems").select("*").order("created_at", desc=True).execute().data
+    
+    # Check solved status for students
+    if user["role"] == "student":
+        solved_ids = {
+            s["problem_id"] 
+            for s in supabase.table("problem_submissions")
+            .select("problem_id")
+            .eq("student_id", user["id"])
+            .eq("status", "accepted")
+            .execute().data
+        }
+        for p in problems:
+            p["solved"] = p["id"] in solved_ids
+            
+    return problems
+
+
+@api.post("/problems")
+async def create_problem(payload: ProblemIn, user: dict = Depends(require_roles("admin"))):
+    problem_id = str(uuid.uuid4())
+    problem_doc = {
+        "id": problem_id,
+        "title": payload.title,
+        "description": payload.description,
+        "difficulty": payload.difficulty,
+        "tags": payload.tags,
+        "time_limit_seconds": payload.time_limit_seconds,
+        "created_by": user["id"],
+        "created_at": iso(now_utc())
+    }
+    supabase.table("problems").insert(problem_doc).execute()
+    
+    # Insert test cases
+    test_cases = []
+    for tc in payload.test_cases:
+        tc_doc = {
+            "id": str(uuid.uuid4()),
+            "problem_id": problem_id,
+            "input": tc.input,
+            "expected_output": tc.expected_output,
+            "is_sample": tc.is_sample,
+            "order_index": tc.order_index
+        }
+        test_cases.append(tc_doc)
+    
+    if test_cases:
+        supabase.table("test_cases").insert(test_cases).execute()
+        
+    return {**problem_doc, "test_cases": test_cases}
+
+
+@api.get("/problems/{id}")
+async def get_problem(id: str, user: dict = Depends(get_current_user)):
+    problem = get_single_or_none(supabase.table("problems").select("*").eq("id", id))
+    if not problem:
+        raise HTTPException(404, "Problem not found")
+        
+    # Admins get all test cases, students only get samples
+    tc_query = supabase.table("test_cases").select("*").eq("problem_id", id).order("order_index")
+    if user["role"] != "admin":
+        tc_query = tc_query.eq("is_sample", True)
+    
+    problem["test_cases"] = tc_query.execute().data
+    
+    # Fetch history if student
+    if user["role"] == "student":
+        problem["submissions"] = supabase.table("problem_submissions")\
+            .select("*")\
+            .eq("problem_id", id)\
+            .eq("student_id", user["id"])\
+            .order("submitted_at", desc=True)\
+            .execute().data
+            
+    return problem
+
+
+@api.put("/problems/{id}")
+async def update_problem(id: str, payload: ProblemIn, _: dict = Depends(require_roles("admin"))):
+    existing = get_single_or_none(supabase.table("problems").select("id").eq("id", id))
+    if not existing:
+        raise HTTPException(404, "Problem not found")
+        
+    # Update problem
+    supabase.table("problems").update({
+        "title": payload.title,
+        "description": payload.description,
+        "difficulty": payload.difficulty,
+        "tags": payload.tags,
+        "time_limit_seconds": payload.time_limit_seconds
+    }).eq("id", id).execute()
+    
+    # Replace test cases: delete then insert
+    supabase.table("test_cases").delete().eq("problem_id", id).execute()
+    
+    test_cases = []
+    for tc in payload.test_cases:
+        tc_doc = {
+            "id": str(uuid.uuid4()),
+            "problem_id": id,
+            "input": tc.input,
+            "expected_output": tc.expected_output,
+            "is_sample": tc.is_sample,
+            "order_index": tc.order_index
+        }
+        test_cases.append(tc_doc)
+    
+    if test_cases:
+        supabase.table("test_cases").insert(test_cases).execute()
+        
+    return {"ok": True}
+
+
+@api.delete("/problems/{id}")
+async def delete_problem(id: str, _: dict = Depends(require_roles("admin"))):
+    supabase.table("problems").delete().eq("id", id).execute()
+    # test_cases should cascade if FK is set, but we can be explicit
+    supabase.table("test_cases").delete().eq("problem_id", id).execute()
+    return {"ok": True}
+
+
+@api.post("/problems/{id}/submit")
+async def submit_problem(id: str, payload: ProblemSubmitIn, user: dict = Depends(get_current_user)):
+    problem = get_single_or_none(supabase.table("problems").select("*").eq("id", id))
+    if not problem:
+        raise HTTPException(404, "Problem not found")
+        
+    test_cases = supabase.table("test_cases").select("*").eq("problem_id", id).order("order_index").execute().data
+    if not test_cases:
+        raise HTTPException(400, "No test cases found for this problem")
+
+    client_id = os.getenv("JDOODLE_CLIENT_ID")
+    client_secret = os.getenv("JDOODLE_CLIENT_SECRET")
+    
+    results = []
+    all_passed = True
+    overall_status = "accepted"
+
+    async with httpx.AsyncClient() as client:
+        for tc in test_cases:
+            try:
+                # Reuse the proxy logic but call JDoodle directly
+                res = await client.post("https://api.jdoodle.com/v1/execute", json={
+                    "clientId": client_id,
+                    "clientSecret": client_secret,
+                    "script": payload.code,
+                    "stdin": tc["input"],
+                    "language": payload.language,
+                    "versionIndex": "4"
+                }, timeout=float(problem["time_limit_seconds"]) + 5.0) # Grace period
+                
+                if res.status_code != 200:
+                    all_passed = False
+                    overall_status = "error"
+                    results.append({
+                        "test_case_id": tc["id"],
+                        "passed": False,
+                        "actual_output": f"Engine Error: {res.text}",
+                        "is_sample": tc["is_sample"]
+                    })
+                    break # Stop on engine error
+
+                data = res.json()
+                actual = data.get("output", "").strip()
+                expected = tc["expected_output"].strip()
+                
+                passed = actual == expected
+                if not passed:
+                    all_passed = False
+                    overall_status = "wrong_answer"
+                
+                results.append({
+                    "test_case_id": tc["id"],
+                    "passed": passed,
+                    "actual_output": actual,
+                    "is_sample": tc["is_sample"]
+                })
+                
+            except Exception as e:
+                all_passed = False
+                overall_status = "error"
+                results.append({
+                    "test_case_id": tc["id"],
+                    "passed": False,
+                    "actual_output": f"Runner Error: {str(e)}",
+                    "is_sample": tc["is_sample"]
+                })
+                break
+
+    # Save submission
+    submission_doc = {
+        "id": str(uuid.uuid4()),
+        "problem_id": id,
+        "student_id": user["id"],
+        "code": payload.code,
+        "language": payload.language,
+        "submission_type": "submit",
+        "status": overall_status,
+        "test_results": results,
+        "submitted_at": iso(now_utc())
+    }
+    supabase.table("problem_submissions").insert(submission_doc).execute()
+
+    return {
+        "status": overall_status,
+        "test_results": results
+    }
 
 
 @api.get("/")

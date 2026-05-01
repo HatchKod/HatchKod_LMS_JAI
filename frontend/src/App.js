@@ -14,6 +14,9 @@ import MentorDashboard from "./pages/MentorDashboard";
 import AdminDashboard from "./pages/AdminDashboard";
 import AdminCourseEditor from "./pages/AdminCourseEditor";
 import PlaygroundPage from "./pages/PlaygroundPage";
+import ProblemLibraryPage from "./pages/ProblemLibraryPage";
+import ProblemDetailPage from "./pages/ProblemDetailPage";
+import ProblemManagementPage from "./pages/admin/ProblemManagementPage";
 
 export default function App() {
   return (
@@ -45,6 +48,15 @@ export default function App() {
               } />
               <Route path="/playground" element={
                 <ProtectedRoute><PlaygroundPage /></ProtectedRoute>
+              } />
+              <Route path="/problems" element={
+                <ProtectedRoute><ProblemLibraryPage /></ProtectedRoute>
+              } />
+              <Route path="/problems/:id" element={
+                <ProtectedRoute><ProblemDetailPage /></ProtectedRoute>
+              } />
+              <Route path="/admin/problems" element={
+                <ProtectedRoute roles={["admin"]}><ProblemManagementPage /></ProtectedRoute>
               } />
             </Routes>
           </BrowserRouter>
