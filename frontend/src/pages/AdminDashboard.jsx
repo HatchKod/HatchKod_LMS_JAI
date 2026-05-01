@@ -30,7 +30,10 @@ import {
   UserCheck,
   UserPlus,
   MoreVertical,
-  UserX
+  UserX,
+  RotateCcw,
+  ChevronDown,
+  ChevronUp
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -39,16 +42,22 @@ export default function AdminDashboard() {
   const [courses, setCourses] = useState([]);
   const [students, setStudents] = useState([]);
   const [mentors, setMentors] = useState([]);
+  const [inactiveUsers, setInactiveUsers] = useState([]);
   const [activeTab, setActiveTab] = useState("courses");
 
   const refresh = async () => {
-    const [s, c, st, mt] = await Promise.all([
+    const [s, c, st, mt, inact] = await Promise.all([
       api.get("/dashboard/admin"),
       api.get("/courses"),
       api.get("/users", { params: { role: "student" } }),
       api.get("/users", { params: { role: "mentor" } }),
+      api.get("/users/inactive")
     ]);
-    setStats(s.data); setCourses(c.data); setStudents(st.data); setMentors(mt.data);
+    setStats(s.data); 
+    setCourses(c.data); 
+    setStudents(st.data); 
+    setMentors(mt.data);
+    setInactiveUsers(inact.data);
   };
   useEffect(() => { refresh(); }, []);
 
@@ -90,7 +99,7 @@ export default function AdminDashboard() {
             <CoursesPanel courses={courses} stats={stats} refresh={refresh} />
           </TabsContent>
           <TabsContent value="users" className="mt-0 outline-none">
-            <UsersPanel students={students} mentors={mentors} stats={stats} refresh={refresh} />
+            <UsersPanel students={students} mentors={mentors} inactiveUsers={inactiveUsers} stats={stats} refresh={refresh} />
           </TabsContent>
         </Tabs>
       </div>
@@ -305,7 +314,9 @@ function CoursesPanel({ courses, stats, refresh }) {
   );
 }
 
-function UsersPanel({ students, mentors, stats, refresh }) {
+function UsersPanel({ students, mentors, inactiveUsers, stats, refresh }) {
+  const [showInactive, setShowInactive] = useState(false);
+
   const assign = async (sid, mid) => {
     try {
       await api.post(`/users/${sid}/assign-mentor`, { mentor_id: mid });
@@ -318,6 +329,14 @@ function UsersPanel({ students, mentors, stats, refresh }) {
     try {
       await api.patch(`/users/${user.id}/deactivate`);
       toast.success("User deactivated"); refresh();
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+
+  const activate = async (user) => {
+    if (!confirm(`Reactivate ${user.name}? They will regain access to the platform.`)) return;
+    try {
+      await api.patch(`/users/${user.id}/activate`);
+      toast.success("User reactivated"); refresh();
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
 
@@ -336,7 +355,7 @@ function UsersPanel({ students, mentors, stats, refresh }) {
   }, [students]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {stats && (
         <div className="flex flex-wrap gap-2">
           <Stat label="Students" v={stats.students} icon={Users} color="border-blue-500" />
@@ -441,6 +460,68 @@ function UsersPanel({ students, mentors, stats, refresh }) {
             {mentors.length === 0 && <div className="p-12 text-center text-slate-400 text-sm italic">No mentors registered yet.</div>}
           </div>
         </Card>
+      </div>
+
+      <div className="pt-4">
+        <button 
+          onClick={() => setShowInactive(!showInactive)}
+          className="flex items-center gap-2 text-slate-400 hover:text-slate-600 transition-colors text-sm font-bold uppercase tracking-widest group"
+        >
+          {showInactive ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+          Inactive Users ({inactiveUsers.length})
+        </button>
+
+        {showInactive && (
+          <Card className="mt-4 rounded-xl border-slate-200 overflow-hidden bg-white shadow-sm border-dashed">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-[10px] tracking-wider">
+                  <tr>
+                    <th className="px-6 py-3">Name</th>
+                    <th className="px-6 py-3">Email</th>
+                    <th className="px-6 py-3">Role</th>
+                    <th className="px-6 py-3">Joined</th>
+                    <th className="px-6 py-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {inactiveUsers.map((u) => (
+                    <tr key={u.id} className="hover:bg-slate-50/50 transition-colors group">
+                      <td className="px-6 py-4 font-bold text-slate-900">{u.name}</td>
+                      <td className="px-6 py-4 text-slate-500">{u.email}</td>
+                      <td className="px-6 py-4">
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                          u.role === "mentor" ? "bg-purple-50 text-purple-600 border border-purple-100" : "bg-blue-50 text-blue-600 border border-blue-100"
+                        }`}>
+                          {u.role}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-slate-400 text-xs">
+                        {new Date(u.created_at).toLocaleDateString()}
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <Button 
+                          onClick={() => activate(u)}
+                          variant="ghost" 
+                          size="sm" 
+                          className="h-8 px-3 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 font-bold rounded-md"
+                        >
+                          <RotateCcw className="mr-2 h-3.5 w-3.5" />
+                          Activate
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                  {inactiveUsers.length === 0 && (
+                    <tr>
+                      <td colSpan="5" className="px-6 py-12 text-center text-slate-400 italic">No inactive users found.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        )}
       </div>
     </div>
   );

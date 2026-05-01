@@ -675,6 +675,22 @@ async def deactivate_user(user_id: str, _: dict = Depends(require_roles("admin")
     return {"ok": True}
 
 
+@api.get("/users/inactive")
+async def list_inactive_users(_: dict = Depends(require_roles("admin"))):
+    users = supabase.table("users").select("*").eq("is_active", False).order("created_at", desc=True).execute().data
+    return users
+
+
+@api.patch("/users/{user_id}/activate")
+async def activate_user(user_id: str, _: dict = Depends(require_roles("admin"))):
+    user = get_single_or_none(supabase.table("users").select("*").eq("id", user_id))
+    if not user:
+        raise HTTPException(404, "User not found")
+    
+    supabase.table("users").update({"is_active": True}).eq("id", user_id).execute()
+    return {"ok": True}
+
+
 @api.post("/users/{user_id}/assign-mentor")
 async def assign_mentor(user_id: str, payload: AssignMentorIn, _: dict = Depends(require_roles("admin"))):
     student = get_single_or_none(supabase.table("users").select("*").eq("id", user_id))
