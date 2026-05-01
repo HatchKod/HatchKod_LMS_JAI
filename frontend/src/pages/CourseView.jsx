@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import Navbar from "../components/Navbar";
-import { api } from "../lib/api";
+import { api, formatApiError } from "../lib/api";
 import { Card } from "../components/ui/card";
 import { Lock, CheckCircle2, PlayCircle } from "lucide-react";
 import StatusPill from "../components/StatusPill";
 import { useAuth } from "../lib/auth";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../components/ui/tooltip";
+import { toast } from "sonner";
 
 export default function CourseView() {
   const { id } = useParams();
@@ -67,7 +69,10 @@ export default function CourseView() {
 
 function LessonRow({ lesson, li, locked }) {
   const Inner = (
-    <div className={`flex items-center justify-between gap-4 p-4 border-b last:border-b-0 border-border ${locked ? "opacity-60" : "hover:bg-slate-50"}`}>
+    <div 
+      onClick={() => locked && toast.error("Complete the previous lesson to unlock this one")}
+      className={`flex items-center justify-between gap-4 p-4 border-b last:border-b-0 border-border ${locked ? "opacity-60 cursor-not-allowed" : "hover:bg-slate-50 cursor-pointer"}`}
+    >
       <div className="flex items-center gap-3 min-w-0">
         <span className="grid h-7 w-7 place-items-center bg-[#F4F5F7] border border-border font-mono text-xs">
           {li + 1}
@@ -86,6 +91,17 @@ function LessonRow({ lesson, li, locked }) {
       </div>
     </div>
   );
-  if (locked) return <div data-testid={`lesson-row-locked-${lesson.id}`}>{Inner}</div>;
+  if (locked) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div data-testid={`lesson-row-locked-${lesson.id}`}>{Inner}</div>
+        </TooltipTrigger>
+        <TooltipContent side="right">
+          Complete previous task to unlock
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
   return <Link to={`/lesson/${lesson.id}`} data-testid={`lesson-row-${lesson.id}`}>{Inner}</Link>;
 }

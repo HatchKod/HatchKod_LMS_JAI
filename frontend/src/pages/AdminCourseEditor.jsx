@@ -95,18 +95,32 @@ export default function AdminCourseEditor() {
 function ModuleDialog({ onCreate }) {
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
+  const [busy, setBusy] = useState(false);
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button className="rounded-sm bg-[#194BFB] hover:bg-[#0F3AE5]" data-testid="admin-new-module-btn"><Plus className="mr-1.5 h-4 w-4" />New Module</Button>
       </DialogTrigger>
       <DialogContent className="rounded-sm">
-        <DialogHeader><DialogTitle>New Module</DialogTitle></DialogHeader>
-        <Label className="text-xs uppercase tracking-wider">Title</Label>
-        <Input value={title} onChange={(e) => setTitle(e.target.value)} className="rounded-sm" data-testid="admin-module-title-input" />
-        <DialogFooter>
-          <Button onClick={() => { onCreate(title); setOpen(false); setTitle(""); }} className="rounded-sm bg-[#194BFB] hover:bg-[#0F3AE5]" data-testid="admin-create-module-confirm">Create</Button>
-        </DialogFooter>
+        <form onSubmit={async (e) => {
+          e.preventDefault();
+          setBusy(true);
+          try { await onCreate(title); setOpen(false); setTitle(""); }
+          finally { setBusy(false); }
+        }}>
+          <DialogHeader><DialogTitle>New Module</DialogTitle></DialogHeader>
+          <div className="space-y-4 my-4">
+            <div>
+              <Label className="text-xs uppercase tracking-wider">Title <span className="text-red-500">*</span></Label>
+              <Input required value={title} onChange={(e) => setTitle(e.target.value)} className="rounded-sm" data-testid="admin-module-title-input" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="submit" disabled={busy} className="rounded-sm bg-[#194BFB] hover:bg-[#0F3AE5]" data-testid="admin-create-module-confirm">
+              {busy ? "Creating…" : "Create"}
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );
@@ -115,39 +129,54 @@ function ModuleDialog({ onCreate }) {
 function LessonDialog({ onCreate, count }) {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ title: "", video_url: "", content: "", taskDesc: "", taskInstr: "", taskOutput: "" });
+  const [busy, setBusy] = useState(false);
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button size="sm" variant="outline" className="rounded-sm" data-testid="admin-new-lesson-btn"><Plus className="mr-1.5 h-4 w-4" />Lesson</Button>
       </DialogTrigger>
       <DialogContent className="rounded-sm max-w-lg">
-        <DialogHeader><DialogTitle>New Lesson</DialogTitle></DialogHeader>
-        <div className="space-y-3 max-h-[60vh] overflow-auto">
-          <div><Label className="text-xs uppercase tracking-wider">Title</Label>
-            <Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} className="rounded-sm" data-testid="admin-lesson-title-input" /></div>
-          <div><Label className="text-xs uppercase tracking-wider">Video URL (embed)</Label>
-            <Input value={form.video_url} onChange={(e) => setForm({ ...form, video_url: e.target.value })} className="rounded-sm" /></div>
-          <div><Label className="text-xs uppercase tracking-wider">Content</Label>
-            <Textarea value={form.content} onChange={(e) => setForm({ ...form, content: e.target.value })} className="rounded-sm" /></div>
-          <div className="border-t border-border pt-3">
-            <div className="text-[10px] uppercase tracking-[0.22em] text-slate-500 mb-2">Attach a task</div>
-            <div className="space-y-2">
-              <Input placeholder="Task description" value={form.taskDesc} onChange={(e) => setForm({ ...form, taskDesc: e.target.value })} className="rounded-sm" data-testid="admin-task-desc-input" />
-              <Textarea placeholder="Instructions" value={form.taskInstr} onChange={(e) => setForm({ ...form, taskInstr: e.target.value })} className="rounded-sm" data-testid="admin-task-instr-input" />
-              <Textarea placeholder="Expected output (optional)" value={form.taskOutput} onChange={(e) => setForm({ ...form, taskOutput: e.target.value })} className="rounded-sm" />
-            </div>
-          </div>
-        </div>
-        <DialogFooter>
-          <Button onClick={() => {
-            onCreate(
+        <form onSubmit={async (e) => {
+          e.preventDefault();
+          setBusy(true);
+          try {
+            await onCreate(
               { title: form.title, video_url: form.video_url, content: form.content, sequence_order: count },
               { description: form.taskDesc, instructions: form.taskInstr, expected_output: form.taskOutput },
             );
             setOpen(false);
             setForm({ title: "", video_url: "", content: "", taskDesc: "", taskInstr: "", taskOutput: "" });
-          }} className="rounded-sm bg-[#194BFB] hover:bg-[#0F3AE5]" data-testid="admin-create-lesson-confirm">Create</Button>
-        </DialogFooter>
+          } finally { setBusy(false); }
+        }}>
+          <DialogHeader><DialogTitle>New Lesson</DialogTitle></DialogHeader>
+          <div className="space-y-3 my-4 max-h-[60vh] overflow-auto pr-2">
+            <div>
+              <Label className="text-xs uppercase tracking-wider">Title <span className="text-red-500">*</span></Label>
+              <Input required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} className="rounded-sm" data-testid="admin-lesson-title-input" />
+            </div>
+            <div>
+              <Label className="text-xs uppercase tracking-wider">Video URL (optional)</Label>
+              <Input value={form.video_url} onChange={(e) => setForm({ ...form, video_url: e.target.value })} className="rounded-sm" />
+            </div>
+            <div>
+              <Label className="text-xs uppercase tracking-wider">Content <span className="text-red-500">*</span></Label>
+              <Textarea required value={form.content} onChange={(e) => setForm({ ...form, content: e.target.value })} className="rounded-sm" />
+            </div>
+            <div className="border-t border-border pt-3">
+              <div className="text-[10px] uppercase tracking-[0.22em] text-slate-500 mb-2">Attach a task (optional)</div>
+              <div className="space-y-2">
+                <Input placeholder="Task description" value={form.taskDesc} onChange={(e) => setForm({ ...form, taskDesc: e.target.value })} className="rounded-sm" data-testid="admin-task-desc-input" />
+                <Textarea placeholder="Instructions" value={form.taskInstr} onChange={(e) => setForm({ ...form, taskInstr: e.target.value })} className="rounded-sm" data-testid="admin-task-instr-input" />
+                <Textarea placeholder="Expected output (optional)" value={form.taskOutput} onChange={(e) => setForm({ ...form, taskOutput: e.target.value })} className="rounded-sm" />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="submit" disabled={busy} className="rounded-sm bg-[#194BFB] hover:bg-[#0F3AE5]" data-testid="admin-create-lesson-confirm">
+              {busy ? "Creating…" : "Create"}
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );

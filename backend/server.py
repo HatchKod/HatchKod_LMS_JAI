@@ -5,6 +5,7 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
 import os
+import re
 import logging
 import uuid
 from datetime import datetime, timezone, timedelta
@@ -167,6 +168,17 @@ class AssignMentorIn(BaseModel):
     mentor_id: str
 
 
+class AdminUserIn(BaseModel):
+    name: str
+    email: EmailStr
+    password: str = Field(min_length=6)
+    role: Literal["student", "mentor"] = "student"
+
+
+class CourseStatusIn(BaseModel):
+    status: Literal["draft", "published", "inactive"]
+
+
 # -------------------- Auth Endpoints --------------------
 @api.post("/auth/register")
 async def register(payload: RegisterIn, response: Response):
@@ -234,6 +246,12 @@ async def create_course(payload: CourseIn, _: dict = Depends(require_roles("admi
     }
     supabase.table("courses").insert(doc).execute()
     return doc
+
+
+@api.put("/courses/{course_id}/status")
+async def update_course_status(course_id: str, payload: CourseStatusIn, _: dict = Depends(require_roles("admin"))):
+    supabase.table("courses").update({"status": payload.status}).eq("id", course_id).execute()
+    return {"ok": True}
 
 
 @api.get("/courses/{course_id}")
@@ -481,6 +499,12 @@ async def submit_task(lesson_id: str, payload: SubmissionIn, user: dict = Depend
     if not (payload.submission_url or payload.submission_text):
         raise HTTPException(400, "Provide GitHub link or text")
 
+    if payload.submission_url:
+        # Simple regex for github URL: https://github.com/username/repo
+        github_regex = r"^https?://(www\.)?github\.com/[\w.-]+/[\w.-]+/?.*$"
+        if not re.match(github_regex, payload.submission_url):
+            raise HTTPException(400, "Invalid GitHub URL format")
+
     # If a previous submission is in 'rework' or 'pending', overwrite it; else create new
     existing = supabase.table("submissions").select("*").eq("student_id", user["id"]).eq("lesson_id", lesson_id).order("submitted_at", desc=True).limit(1).execute().data
     if existing and existing[0].get("status") in ("rework", "pending"):
@@ -510,6 +534,19 @@ async def submit_task(lesson_id: str, payload: SubmissionIn, user: dict = Depend
     }
     supabase.table("submissions").insert(doc).execute()
     return doc
+
+
+@api.delete("/submissions/{submission_id}")
+async def delete_submission(submission_id: str, user: dict = Depends(require_roles("student"))):
+    sub = get_single_or_none(supabase.table("submissions").select("*").eq("id", submission_id))
+    if not sub:
+        raise HTTPException(404, "Submission not found")
+    if sub["student_id"] != user["id"]:
+        raise HTTPException(403, "Forbidden")
+    if sub["status"] == "approved":
+        raise HTTPException(400, "Cannot delete approved submission")
+    supabase.table("submissions").delete().eq("id", submission_id).execute()
+    return {"ok": True}
 
 
 @api.get("/submissions/pending")
@@ -556,6 +593,8 @@ async def review_submission(
     sub = get_single_or_none(supabase.table("submissions").select("*").eq("id", submission_id))
     if not sub:
         raise HTTPException(404, "Submission not found")
+    if payload.status == "rework" and not payload.feedback.strip():
+        raise HTTPException(400, "Feedback is required when requesting rework")
     update = {
         "status": payload.status,
         "feedback": payload.feedback,
@@ -595,6 +634,27 @@ async def assign_mentor(user_id: str, payload: AssignMentorIn, _: dict = Depends
     # Update existing pending submissions
     supabase.table("submissions").update({"mentor_id": payload.mentor_id}).eq("student_id", user_id).in_("status", ["pending", "rework"]).execute()
     return {"ok": True}
+
+
+@api.post("/admin/users")
+async def admin_create_user(payload: AdminUserIn, _: dict = Depends(require_roles("admin"))):
+    email = payload.email.lower()
+    existing = supabase.table("users").select("id").eq("email", email).execute()
+    if existing.data:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    user_id = str(uuid.uuid4())
+    user_doc = {
+        "id": user_id,
+        "name": payload.name,
+        "email": email,
+        "password_hash": hash_password(payload.password),
+        "role": payload.role,
+        "assigned_mentor_id": None,
+        "created_at": iso(now_utc()),
+    }
+    supabase.table("users").insert(user_doc).execute()
+    user_doc.pop("password_hash", None)
+    return user_doc
 
 
 # -------------------- Dashboards --------------------

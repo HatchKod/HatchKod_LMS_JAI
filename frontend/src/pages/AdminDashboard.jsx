@@ -97,6 +97,10 @@ function CoursesPanel({ courses, refresh }) {
     try { await api.delete(`/courses/${id}`); toast.success("Deleted"); refresh(); }
     catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
+  const updateStatus = async (id, status) => {
+    try { await api.put(`/courses/${id}/status`, { status }); toast.success("Status updated"); refresh(); }
+    catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
 
   return (
     <div>
@@ -107,18 +111,20 @@ function CoursesPanel({ courses, refresh }) {
             <Button className="rounded-sm bg-[#194BFB] hover:bg-[#0F3AE5]" data-testid="admin-new-course-btn"><Plus className="mr-1.5 h-4 w-4" />New Course</Button>
           </DialogTrigger>
           <DialogContent className="rounded-sm">
-            <DialogHeader><DialogTitle>Create Course</DialogTitle></DialogHeader>
-            <div className="space-y-3">
-              <div><Label className="text-xs uppercase tracking-wider">Title</Label>
-                <Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} className="rounded-sm" data-testid="admin-course-title-input" /></div>
-              <div><Label className="text-xs uppercase tracking-wider">Description</Label>
-                <Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className="rounded-sm" data-testid="admin-course-desc-input" /></div>
-              <div><Label className="text-xs uppercase tracking-wider">Thumbnail URL</Label>
-                <Input value={form.thumbnail_url} onChange={(e) => setForm({ ...form, thumbnail_url: e.target.value })} className="rounded-sm" /></div>
-            </div>
-            <DialogFooter>
-              <Button onClick={create} disabled={busy} className="rounded-sm bg-[#194BFB] hover:bg-[#0F3AE5]" data-testid="admin-create-course-confirm">Create</Button>
-            </DialogFooter>
+            <form onSubmit={(e) => { e.preventDefault(); create(); }}>
+              <DialogHeader><DialogTitle>Create Course</DialogTitle></DialogHeader>
+              <div className="space-y-3 my-4">
+                <div><Label className="text-xs uppercase tracking-wider">Title <span className="text-red-500">*</span></Label>
+                  <Input required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} className="rounded-sm" data-testid="admin-course-title-input" /></div>
+                <div><Label className="text-xs uppercase tracking-wider">Description <span className="text-red-500">*</span></Label>
+                  <Textarea required value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className="rounded-sm" data-testid="admin-course-desc-input" /></div>
+                <div><Label className="text-xs uppercase tracking-wider">Thumbnail URL (optional)</Label>
+                  <Input value={form.thumbnail_url} onChange={(e) => setForm({ ...form, thumbnail_url: e.target.value })} className="rounded-sm" /></div>
+              </div>
+              <DialogFooter>
+                <Button type="submit" disabled={busy} className="rounded-sm bg-[#194BFB] hover:bg-[#0F3AE5]" data-testid="admin-create-course-confirm">Create</Button>
+              </DialogFooter>
+            </form>
           </DialogContent>
         </Dialog>
       </div>
@@ -132,9 +138,21 @@ function CoursesPanel({ courses, refresh }) {
                 <div className="font-[Outfit] text-lg font-semibold mt-1">{c.title}</div>
                 <div className="text-sm text-slate-600 mt-1 line-clamp-2">{c.description}</div>
               </div>
-              <button onClick={() => remove(c.id)} className="text-slate-400 hover:text-red-600" title="Delete" data-testid={`admin-delete-course-${c.id}`}>
-                <Trash2 className="h-4 w-4" />
-              </button>
+              <div className="flex flex-col items-end gap-2 shrink-0">
+                <button onClick={() => remove(c.id)} className="text-slate-400 hover:text-red-600" title="Delete" data-testid={`admin-delete-course-${c.id}`}>
+                  <Trash2 className="h-4 w-4" />
+                </button>
+                <Select value={c.status} onValueChange={(v) => updateStatus(c.id, v)}>
+                  <SelectTrigger className="h-7 w-28 text-xs rounded-sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="draft">Draft</SelectItem>
+                    <SelectItem value="published">Published</SelectItem>
+                    <SelectItem value="inactive">Inactive</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
             <div className="mt-4 flex gap-2">
               <Button asChild variant="outline" size="sm" className="rounded-sm" data-testid={`admin-view-course-${c.id}`}>
@@ -159,10 +177,58 @@ function UsersPanel({ students, mentors, refresh }) {
       toast.success("Mentor assigned"); refresh();
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
+
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({ name: "", email: "", password: "", role: "student" });
+  const [busy, setBusy] = useState(false);
+
+  const create = async () => {
+    setBusy(true);
+    try {
+      await api.post("/admin/users", form);
+      toast.success("User created"); setOpen(false); setForm({ name: "", email: "", password: "", role: "student" });
+      refresh();
+    } catch (e) {
+      toast.error(formatApiError(e.response?.data?.detail));
+    } finally { setBusy(false); }
+  };
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
       <Card className="rounded-sm border-border">
-        <div className="p-4 border-b border-border bg-[#F4F5F7]"><div className="text-[10px] uppercase tracking-[0.22em] text-slate-500">Students</div></div>
+        <div className="p-4 border-b border-border bg-[#F4F5F7] flex items-center justify-between">
+          <div className="text-[10px] uppercase tracking-[0.22em] text-slate-500">Students</div>
+          <Dialog open={open} onOpenChange={setOpen}>
+            <DialogTrigger asChild>
+              <Button size="sm" variant="outline" className="h-7 text-xs rounded-sm" data-testid="admin-add-user-btn"><Plus className="mr-1 h-3 w-3" />Add User</Button>
+            </DialogTrigger>
+            <DialogContent className="rounded-sm">
+              <form onSubmit={(e) => { e.preventDefault(); create(); }}>
+                <DialogHeader><DialogTitle>Create New User</DialogTitle></DialogHeader>
+                <div className="space-y-3 my-4">
+                  <div><Label className="text-xs uppercase tracking-wider">Name <span className="text-red-500">*</span></Label>
+                    <Input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="rounded-sm" /></div>
+                  <div><Label className="text-xs uppercase tracking-wider">Email <span className="text-red-500">*</span></Label>
+                    <Input required type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="rounded-sm" /></div>
+                  <div><Label className="text-xs uppercase tracking-wider">Password <span className="text-red-500">*</span></Label>
+                    <Input required minLength={6} type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} className="rounded-sm" /></div>
+                  <div><Label className="text-xs uppercase tracking-wider">Role <span className="text-red-500">*</span></Label>
+                    <Select value={form.role} onValueChange={(v) => setForm({ ...form, role: v })}>
+                      <SelectTrigger className="rounded-sm"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="student">Student</SelectItem>
+                        <SelectItem value="mentor">Mentor</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button type="submit" disabled={busy} className="rounded-sm bg-[#194BFB] hover:bg-[#0F3AE5]">Create User</Button>
+                </DialogFooter>
+              </form>
+            </DialogContent>
+          </Dialog>
+        </div>
         <div className="divide-y divide-border">
           {students.map((s) => (
             <div key={s.id} className="p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3" data-testid={`admin-student-row-${s.id}`}>

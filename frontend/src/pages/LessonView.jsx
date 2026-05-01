@@ -20,6 +20,8 @@ export default function LessonView() {
   const [url, setUrl] = useState("");
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [submissionError, setSubmissionError] = useState("");
 
   const load = async () => {
     setError("");
@@ -39,14 +41,32 @@ export default function LessonView() {
 
   const submit = async (e) => {
     e.preventDefault();
-    if (!url && !text) { toast.error("Add a GitHub link or text"); return; }
+    setSubmissionError("");
+    if (!url && !text) { setSubmissionError("Add a GitHub link or text"); return; }
     setBusy(true);
     try {
       await api.post(`/lessons/${id}/submit`, { submission_url: url, submission_text: text });
       toast.success("Submitted! Mentor will review shortly.");
+      setIsEditing(false);
+      setSubmissionError("");
       await load();
     } catch (e) {
-      toast.error(formatApiError(e.response?.data?.detail) || "Submission failed");
+      setSubmissionError(formatApiError(e.response?.data?.detail) || "Submission failed");
+    } finally { setBusy(false); }
+  };
+ 
+  const handleDelete = async () => {
+    if (!confirm("Delete this submission?")) return;
+    setBusy(true);
+    try {
+      await api.delete(`/submissions/${submission.id}`);
+      toast.success("Submission deleted");
+      setIsEditing(false);
+      setUrl("");
+      setText("");
+      await load();
+    } catch (e) {
+      toast.error(formatApiError(e.response?.data?.detail) || "Delete failed");
     } finally { setBusy(false); }
   };
 
@@ -76,7 +96,7 @@ export default function LessonView() {
 
   const { lesson, course, task, submission } = data;
   const isStudent = user?.role === "student";
-  const canResubmit = !submission || submission.status === "rework";
+  const canResubmit = !submission || submission.status === "rework" || isEditing;
 
   const getEmbedUrl = (url) => {
     if (!url) return url;
@@ -153,9 +173,12 @@ export default function LessonView() {
               {isStudent && (
                 <form onSubmit={submit} className="space-y-3 border-t border-border pt-4" data-testid="submission-form">
                   <div className="space-y-1.5">
-                    <Label className="text-xs uppercase tracking-wider flex items-center gap-1.5"><Github className="h-3 w-3" />GitHub URL</Label>
-                    <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://github.com/you/repo"
+                    <Label className="text-xs uppercase tracking-wider flex items-center gap-1.5">
+                      <Github className="h-3 w-3" />GitHub URL <span className="text-red-500">*</span>
+                    </Label>
+                    <Input value={url} onChange={(e) => { setUrl(e.target.value); setSubmissionError(""); }} placeholder="https://github.com/you/repo"
                       className="rounded-sm font-mono text-sm" disabled={!canResubmit} data-testid="submission-url-input" />
+                    {submissionError && <div className="text-[11px] text-red-600 mt-1" data-testid="submission-error-msg">{submissionError}</div>}
                   </div>
                   <div className="space-y-1.5">
                     <Label className="text-xs uppercase tracking-wider">Notes (optional)</Label>
@@ -165,10 +188,20 @@ export default function LessonView() {
                   <div className="flex items-center gap-3">
                     <Button type="submit" disabled={busy || !canResubmit}
                       className="rounded-sm bg-[#194BFB] hover:bg-[#0F3AE5]" data-testid="submission-submit-btn">
-                      {busy ? "Submitting…" : (submission?.status === "rework" ? "Resubmit for review" : "Submit for review")}
+                      {busy ? "Submitting…" : (submission?.status === "rework" || isEditing ? "Save & Resubmit" : "Submit for review")}
                     </Button>
                     {!canResubmit && submission?.status === "pending" && (
-                      <span className="text-xs text-slate-500">Awaiting mentor review</span>
+                      <div className="flex items-center gap-3">
+                        <span className="text-xs text-slate-500">Awaiting mentor review</span>
+                        <div className="flex items-center gap-1 border-l border-border pl-3">
+                          <Button type="button" variant="ghost" size="sm" onClick={() => setIsEditing(true)} className="text-xs h-7 px-2">
+                            Edit
+                          </Button>
+                          <Button type="button" variant="ghost" size="sm" onClick={handleDelete} className="text-xs h-7 px-2 text-red-600 hover:text-red-700 hover:bg-red-50">
+                            Delete
+                          </Button>
+                        </div>
+                      </div>
                     )}
                     {submission?.status === "approved" && (
                       <span className="text-xs text-emerald-700">Approved. Next lesson unlocked.</span>
