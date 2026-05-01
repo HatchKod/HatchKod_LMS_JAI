@@ -69,7 +69,7 @@ export default function AdminDashboard() {
               </TabsTrigger>
             </TabsList>
 
-            <div className="flex items-center pb-2">
+            <div className="flex items-center">
               {activeTab === "courses" ? (
                 <CreateCourseDialog refresh={refresh} />
               ) : (
