@@ -918,16 +918,17 @@ async def list_problems(user: dict = Depends(get_current_user)):
     
     # Check solved status for students
     if user["role"] == "student":
-        solved_ids = {
-            s["problem_id"] 
-            for s in supabase.table("problem_submissions")
-            .select("problem_id")
-            .eq("student_id", user["id"])
-            .eq("status", "accepted")
+        submissions = supabase.table("problem_submissions")\
+            .select("problem_id, status")\
+            .eq("student_id", user["id"])\
             .execute().data
-        }
+            
+        solved_ids = {s["problem_id"] for s in submissions if s["status"] == "accepted"}
+        attempted_ids = {s["problem_id"] for s in submissions}
+        
         for p in problems:
             p["solved"] = p["id"] in solved_ids
+            p["attempted"] = p["id"] in attempted_ids
             
     return problems
 

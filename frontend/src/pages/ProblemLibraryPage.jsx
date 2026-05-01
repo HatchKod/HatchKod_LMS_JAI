@@ -5,7 +5,7 @@ import { Badge } from "../components/ui/badge";
 import Navbar from "../components/Navbar";
 import { api, formatApiError } from "../lib/api";
 import { toast } from "sonner";
-import { Search, Filter, CheckCircle2 } from "lucide-react";
+import { Search, Filter, CheckCircle2, AlertCircle } from "lucide-react";
 import { Input } from "../components/ui/input";
 
 export default function ProblemLibraryPage() {
@@ -111,6 +111,11 @@ export default function ProblemLibraryPage() {
                           <div className="inline-flex items-center gap-1.5 text-emerald-500 font-bold text-xs uppercase tracking-wider">
                             <CheckCircle2 className="h-4 w-4" />
                             Solved
+                          </div>
+                        ) : p.attempted ? (
+                          <div className="inline-flex items-center gap-1.5 text-amber-500 font-bold text-xs uppercase tracking-wider">
+                            <AlertCircle className="h-4 w-4" />
+                            Attempted
                           </div>
                         ) : (
                           <span className="text-slate-300">—</span>
