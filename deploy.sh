@@ -32,10 +32,8 @@ cd ..
 # 4. Frontend Build
 echo -e "${BLUE}Building Frontend...${NC}"
 cd frontend
-# Check if .env exists for frontend build
-if [ ! -f ".env" ]; then
-    echo -e "${GREEN}Warning: frontend/.env not found. Using defaults.${NC}"
-fi
+# Force empty backend URL for production build to use relative /api paths
+export REACT_APP_BACKEND_URL=""
 npm install
 npm run build
 cd ..
