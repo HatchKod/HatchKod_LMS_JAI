@@ -84,6 +84,10 @@ mkdir -p backend/logs
 pm2 start ecosystem.config.js || pm2 restart ecosystem.config.js
 pm2 save
 
+# 7. Enable Startup
+echo -e "${BLUE}Ensuring Nginx starts on boot...${NC}"
+sudo systemctl enable nginx
+
 echo -e "${GREEN}Deployment Successful!${NC}"
 echo -e "Frontend is live at http://$(curl -s ifconfig.me)"
 echo -e "Backend is running on 127.0.0.1:8000 (proxied)"

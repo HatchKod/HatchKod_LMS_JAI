@@ -90,6 +90,13 @@ chmod +x deploy.sh
 ./deploy.sh
 ```
 
+### Enable Automatic Startup (One-time Setup)
+To ensure the app starts automatically whenever the EC2 instance reboots:
+1. Run: `pm2 startup`
+2. Copy and paste the command it gives you into the terminal.
+3. Run: `pm2 save`
+4. Enable Nginx: `sudo systemctl enable nginx`
+
 The script will:
 1. Pull the latest code.
 2. Build the React frontend.
@@ -107,7 +114,13 @@ The script will:
 - **Nginx Logs**: `sudo tail -f /var/log/nginx/error.log`
 
 ### Process Management
-- **Restart Backend**: `pm2 restart hatchkod-backend`
+- **Restart Backend**: pm2 start ecosystem.config.js || pm2 restart ecosystem.config.js
+pm2 save
+
+# 7. Enable Startup
+echo -e "${BLUE}Ensuring services start on boot...${NC}"
+sudo systemctl enable nginx
+# Note: User must run 'pm2 startup' once manually to configure systemd
 - **Stop Backend**: `pm2 stop hatchkod-backend`
 - **View All Processes**: `pm2 status`
 
