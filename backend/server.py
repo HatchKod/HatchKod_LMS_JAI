@@ -877,32 +877,39 @@ class ExecuteIn(BaseModel):
 
 @app.post("/api/execute")
 async def execute_code(payload: ExecuteIn):
-    client_id = os.getenv("JDOODLE_CLIENT_ID")
-    client_secret = os.getenv("JDOODLE_CLIENT_SECRET")
-    
     if not payload.code.strip():
         raise HTTPException(status_code=400, detail="Code cannot be empty")
 
     async with httpx.AsyncClient() as client:
         try:
-            res = await client.post("https://api.jdoodle.com/v1/execute", json={
-                "clientId": client_id,
-                "clientSecret": client_secret,
-                "script": payload.code,
-                "stdin": payload.stdin,
-                "language": "java",
-                "versionIndex": "4"
+            # Switch to Judge0 Public CE Instance
+            res = await client.post("https://ce.judge0.com/submissions?wait=true", json={
+                "source_code": payload.code,
+                "language_id": 62, # Java (OpenJDK 13)
+                "stdin": payload.stdin
             }, timeout=30.0)
             
-            if res.status_code != 200:
-                logger.error(f"JDoodle API error {res.status_code}: {res.text}")
+            if res.status_code not in (200, 201):
+                logger.error(f"Judge0 API error {res.status_code}: {res.text}")
                 raise HTTPException(status_code=res.status_code, detail="Execution engine error")
             
             data = res.json()
+            
+            # Combine stdout, stderr and compile_output for the UI
+            stdout = data.get("stdout") or ""
+            stderr = data.get("stderr") or ""
+            compile_output = data.get("compile_output") or ""
+            
+            output = stdout
+            if compile_output:
+                output = compile_output + "\n" + output
+            if stderr:
+                output = output + "\n" + stderr
+                
             return {
-                "output": data.get("output", ""),
-                "cpuTime": data.get("cpuTime", "0"),
-                "memory": data.get("memory", "0")
+                "output": output,
+                "cpuTime": data.get("time", "0"),
+                "memory": str(data.get("memory", "0"))
             }
         except httpx.TimeoutException:
             raise HTTPException(status_code=504, detail="Execution timed out. Check for infinite loops or missing input.")
@@ -1054,19 +1061,25 @@ async def submit_problem(id: str, payload: ProblemSubmitIn, user: dict = Depends
     overall_status = "accepted"
 
     async with httpx.AsyncClient() as client:
+        # Map frontend language names to Judge0 language IDs
+        lang_map = {
+            "java": 62,
+            "python": 71,
+            "javascript": 63,
+            "cpp": 54
+        }
+        judge0_lang_id = lang_map.get(payload.language.lower(), 62)
+
         for tc in test_cases:
             try:
-                # Reuse the proxy logic but call JDoodle directly
-                res = await client.post("https://api.jdoodle.com/v1/execute", json={
-                    "clientId": client_id,
-                    "clientSecret": client_secret,
-                    "script": payload.code,
-                    "stdin": tc["input"],
-                    "language": payload.language,
-                    "versionIndex": "4"
-                }, timeout=float(problem["time_limit_seconds"]) + 5.0) # Grace period
+                # Use Judge0 API for test case execution
+                res = await client.post("https://ce.judge0.com/submissions?wait=true", json={
+                    "source_code": payload.code,
+                    "language_id": judge0_lang_id,
+                    "stdin": tc["input"]
+                }, timeout=float(problem["time_limit_seconds"]) + 5.0)
                 
-                if res.status_code != 200:
+                if res.status_code not in (200, 201):
                     all_passed = False
                     overall_status = "error"
                     results.append({
@@ -1075,10 +1088,23 @@ async def submit_problem(id: str, payload: ProblemSubmitIn, user: dict = Depends
                         "actual_output": f"Engine Error: {res.text}",
                         "is_sample": tc["is_sample"]
                     })
-                    break # Stop on engine error
+                    break 
 
                 data = res.json()
-                actual = data.get("output", "").strip()
+                
+                # Check for compilation error (status 6)
+                if data.get("status", {}).get("id") == 6:
+                    all_passed = False
+                    overall_status = "compilation_error"
+                    results.append({
+                        "test_case_id": tc["id"],
+                        "passed": False,
+                        "actual_output": data.get("compile_output", "Compilation Error"),
+                        "is_sample": tc["is_sample"]
+                    })
+                    break
+
+                actual = (data.get("stdout") or "").strip()
                 expected = tc["expected_output"].strip()
                 
                 passed = actual == expected
