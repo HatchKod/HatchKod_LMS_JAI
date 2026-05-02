@@ -1,5 +1,6 @@
 fastapi
 uvicorn
+gunicorn
 python-dotenv
 bcrypt
 PyJWT
@@ -8,3 +9,4 @@ httpx
 supabase
 pydantic
 email-validator
+python-multipart
