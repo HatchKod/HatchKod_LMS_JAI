@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { useAuth } from "../lib/auth";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "../components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../components/ui/tooltip";
+import Navbar from "../components/Navbar";
 import Breadcrumbs from "../components/Breadcrumbs";
 
 export default function LessonView() {
@@ -235,22 +236,15 @@ export default function LessonView() {
 
   return (
     <div className="min-h-screen bg-white font-['IBM_Plex_Sans']">
-      {/* Custom Sticky Top Bar */}
-      <header className="sticky top-0 z-50 bg-white border-b border-border h-14 flex items-center px-4 justify-between">
-        <div className="flex items-center gap-6 overflow-hidden mr-4">
-          <Link to={user ? (user.role === 'admin' ? '/admin' : user.role === 'mentor' ? '/mentor' : '/dashboard') : "/"} className="flex items-center gap-2 shrink-0">
-            <img src="/logo.png" alt="HatchKod" className="h-7 w-auto object-contain" />
-            <span className="font-[Outfit] text-base font-extrabold tracking-tight text-[#0A0A0A]">HatchKod</span>
-          </Link>
+      <Navbar />
 
-          <div className="h-6 w-[1px] bg-slate-200 shrink-0" />
-
-          <nav className="hidden md:flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider">
+      <main className="max-w-6xl mx-auto py-8 px-6 min-h-[calc(100vh-120px)] flex flex-col">
+          <div className="mb-6">
             <Sheet>
               <SheetTrigger asChild>
-                <button className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-sm text-slate-600 hover:text-[#194BFB] hover:border-[#194BFB] transition-all whitespace-nowrap group">
+                <button className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-sm text-slate-600 hover:text-[#194BFB] hover:border-[#194BFB] transition-all whitespace-nowrap group text-[11px] font-bold uppercase tracking-wider">
                   <BookOpen className="h-3.5 w-3.5 text-[#194BFB]" />
-                  <span className="font-bold">Module {lesson_index || 1}: {module?.title}</span>
+                  <span>Module {lesson_index || 1}: {module?.title}</span>
                   <ChevronRight className="h-3 w-3 ml-1 group-data-[state=open]:rotate-90 transition-transform" />
                 </button>
               </SheetTrigger>
@@ -300,63 +294,8 @@ export default function LessonView() {
                 </div>
               </SheetContent>
             </Sheet>
-
-            <div className="flex items-center gap-2 bg-white border border-slate-200 px-3 py-1.5 rounded-sm shadow-sm">
-              <FileText className="h-3.5 w-3.5 text-[#F59E0B]" />
-              <span className="font-bold text-slate-900">{lesson.title}</span>
-            </div>
-          </nav>
-
-          {/* Mobile Breadcrumb (Simplified) */}
-          <Link to={`/course/${course?.id}`} className="md:hidden flex items-center gap-2 text-slate-600 font-bold text-[10px] uppercase tracking-wider bg-slate-100 px-3 py-1.5 rounded-sm">
-            <ArrowLeft className="h-3.5 w-3.5" /> Syllabus
-          </Link>
-        </div>
-        
-        <div className="flex items-center gap-3">
-          {lesson.video_url && (
-            <Dialog>
-              <DialogTrigger asChild>
-                <Button size="sm" className="bg-[#10B981] hover:bg-[#0D9668] text-white rounded-sm h-8 px-3 font-bold text-[10px] uppercase tracking-widest gap-2 shrink-0">
-                  <div className="h-4 w-4 rounded-full bg-white/20 flex items-center justify-center">
-                    <Video className="h-2.5 w-2.5" />
-                  </div>
-                  Recordings
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-w-4xl p-0 overflow-hidden bg-black border-none rounded-sm">
-                <DialogHeader className="p-4 bg-white border-b border-border text-left">
-                  <DialogTitle className="text-sm font-bold flex items-center gap-2 uppercase tracking-wider">
-                    <Video className="h-4 w-4 text-[#10B981]" />
-                    Session Recording — {lesson.title}
-                  </DialogTitle>
-                </DialogHeader>
-                <div className="aspect-video w-full">
-                  <iframe
-                    src={getEmbedUrl(lesson.video_url)}
-                    title={lesson.title}
-                    className="w-full h-full"
-                    allow="autoplay; encrypted-media; picture-in-picture"
-                    allowFullScreen
-                  />
-                </div>
-              </DialogContent>
-            </Dialog>
-          )}
-
-
-          <div className="h-8 w-8 rounded-full bg-[#F4F5F7] border border-border flex items-center justify-center overflow-hidden">
-            {user?.avatar ? (
-              <img src={user.avatar} alt={user.name} className="h-full w-full object-cover" />
-            ) : (
-              <span className="text-[10px] font-bold text-slate-400">{user?.name?.charAt(0) || "U"}</span>
-            )}
           </div>
-        </div>
-      </header>
 
-      {/* Main Content Area */}
-      <main className="max-w-6xl mx-auto py-8 px-6 min-h-[calc(100vh-120px)] flex flex-col">
           <Breadcrumbs 
             items={[
               { label: course?.title, to: `/course/${course?.id}` },
@@ -364,7 +303,7 @@ export default function LessonView() {
               { label: lesson?.title }
             ]} 
           />
-          
+
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-3">
               <div className="bg-blue-50 text-[#194BFB] px-3 py-1 rounded-sm text-[10px] font-bold uppercase tracking-wider flex items-center gap-2 border border-blue-100">
@@ -377,6 +316,36 @@ export default function LessonView() {
                 </div>
               )}
             </div>
+
+            {lesson.video_url && (
+              <Dialog>
+                <DialogTrigger asChild>
+                  <Button size="sm" className="bg-[#194BFB] hover:bg-[#0F3AE5] text-white rounded-sm h-8 px-3 font-bold text-[10px] uppercase tracking-widest gap-2 shrink-0">
+                    <div className="h-4 w-4 rounded-full bg-white/20 flex items-center justify-center">
+                      <Video className="h-2.5 w-2.5" />
+                    </div>
+                    Recordings
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-4xl p-0 overflow-hidden bg-black border-none rounded-sm">
+                  <DialogHeader className="p-4 bg-white border-b border-border text-left">
+                    <DialogTitle className="text-sm font-bold flex items-center gap-2 uppercase tracking-wider">
+                      <Video className="h-4 w-4 text-[#194BFB]" />
+                      Session Recording — {lesson.title}
+                    </DialogTitle>
+                  </DialogHeader>
+                  <div className="aspect-video w-full">
+                    <iframe
+                      src={getEmbedUrl(lesson.video_url)}
+                      title={lesson.title}
+                      className="w-full h-full"
+                      allow="autoplay; encrypted-media; picture-in-picture"
+                      allowFullScreen
+                    />
+                  </div>
+                </DialogContent>
+              </Dialog>
+            )}
           </div>
           <h1 className="text-3xl font-extrabold tracking-tight text-[#0A0A0A] font-['Outfit'] mb-8">
             {lesson.title}

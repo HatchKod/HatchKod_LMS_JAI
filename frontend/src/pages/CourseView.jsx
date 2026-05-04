@@ -23,6 +23,16 @@ export default function CourseView() {
     })();
   }, [id]);
 
+  useEffect(() => {
+    if (course && window.location.hash) {
+      const hash = window.location.hash.replace('#', '');
+      const element = document.getElementById(hash);
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth' });
+      }
+    }
+  }, [course]);
+
   if (!course) {
     return (
     <div className="min-h-screen bg-slate-50/30">
@@ -54,13 +64,13 @@ export default function CourseView() {
             <h2 className="text-xl font-bold font-['Outfit'] text-[#0A0A0A]">Syllabus</h2>
           </div>
           
-          <Accordion type="multiple" className="divide-y divide-border">
+          <Accordion type="multiple" className="divide-y divide-border" defaultValue={window.location.hash ? [window.location.hash.replace('#', '')] : []}>
             {course.modules.map((m, mi) => (
-              <AccordionItem key={m.id} value={`module-${m.id}`} className="border-none">
+              <AccordionItem key={m.id} id={`module-${m.id}`} value={`module-${m.id}`} className="border-none">
                 <AccordionTrigger className="px-6 py-5 hover:no-underline group transition-all [&[data-state=open]]:bg-slate-50/50">
                   <div className="flex items-center gap-4 text-left">
-                    <div className="h-10 w-10 bg-amber-50 rounded-sm flex items-center justify-center border border-amber-100 shrink-0">
-                      <Folder className="h-5 w-5 text-amber-500 fill-amber-500" />
+                    <div className="h-10 w-10 bg-[#194BFB]/5 rounded-sm flex items-center justify-center border border-[#194BFB]/10 shrink-0">
+                      <Folder className="h-5 w-5 text-[#194BFB] fill-[#194BFB]" />
                     </div>
                     <div>
                       <div className="text-[10px] uppercase tracking-widest text-slate-400 font-bold mb-0.5">Module {mi + 1}</div>
