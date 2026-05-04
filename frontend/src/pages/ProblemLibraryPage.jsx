@@ -5,10 +5,14 @@ import { Badge } from "../components/ui/badge";
 import Navbar from "../components/Navbar";
 import { api, formatApiError } from "../lib/api";
 import { toast } from "sonner";
-import { Search, Filter, CheckCircle2, AlertCircle } from "lucide-react";
+import { Search, Filter, CheckCircle2, AlertCircle, ChevronLeft, ChevronRight } from "lucide-react";
 import { Input } from "../components/ui/input";
+import { Button } from "../components/ui/button";
 
 export default function ProblemLibraryPage() {
+  const [problems, setProblems] = useState([]);
+  const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
 
