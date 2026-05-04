@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { useAuth } from "../lib/auth";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "../components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../components/ui/tooltip";
+import Breadcrumbs from "../components/Breadcrumbs";
 
 export default function LessonView() {
   const { id } = useParams();
@@ -356,6 +357,14 @@ export default function LessonView() {
 
       {/* Main Content Area */}
       <main className="max-w-6xl mx-auto py-8 px-6 min-h-[calc(100vh-120px)] flex flex-col">
+          <Breadcrumbs 
+            items={[
+              { label: course?.title, to: `/course/${course?.id}` },
+              { label: module?.title },
+              { label: lesson?.title }
+            ]} 
+          />
+          
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-3">
               <div className="bg-blue-50 text-[#194BFB] px-3 py-1 rounded-sm text-[10px] font-bold uppercase tracking-wider flex items-center gap-2 border border-blue-100">

@@ -9,6 +9,7 @@ import { useAuth } from "../lib/auth";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "../components/ui/tooltip";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "../components/ui/accordion";
 import { toast } from "sonner";
+import Breadcrumbs from "../components/Breadcrumbs";
 
 export default function CourseView() {
   const { id } = useParams();
@@ -40,7 +41,9 @@ export default function CourseView() {
       <Navbar />
       <TooltipProvider delayDuration={0}>
         <div className="mx-auto max-w-5xl px-4 sm:px-6 py-12 fade-in">
-        <div className="mb-12 text-center">
+          <Breadcrumbs items={[{ label: course.title }]} />
+          
+          <div className="mb-12 text-center">
           <div className="text-[10px] uppercase tracking-[0.3em] text-[#194BFB] font-bold mb-3">Your Journey</div>
           <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-[#0A0A0A] font-['Outfit']" data-testid="course-title">{course.title}</h1>
           <p className="mt-4 text-slate-500 max-w-2xl mx-auto text-lg">{course.description}</p>
