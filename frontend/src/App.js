@@ -17,6 +17,7 @@ import PlaygroundPage from "./pages/PlaygroundPage";
 import ProblemLibraryPage from "./pages/ProblemLibraryPage";
 import ProblemDetailPage from "./pages/ProblemDetailPage";
 import ProblemManagementPage from "./pages/admin/ProblemManagementPage";
+import ProfilePage from "./pages/ProfilePage";
 
 export default function App() {
   return (
@@ -30,6 +31,9 @@ export default function App() {
               <Route path="/register" element={<Register />} />
               <Route path="/dashboard" element={
                 <ProtectedRoute roles={["student"]}><StudentDashboard /></ProtectedRoute>
+              } />
+              <Route path="/profile" element={
+                <ProtectedRoute roles={["student"]}><ProfilePage /></ProtectedRoute>
               } />
               <Route path="/course/:id" element={
                 <ProtectedRoute roles={["student", "mentor", "admin"]}><CourseView /></ProtectedRoute>

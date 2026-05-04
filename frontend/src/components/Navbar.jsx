@@ -145,6 +145,7 @@ export default function Navbar() {
         <div className="flex items-center gap-4">
           {user ? (
             <DropdownMenu>
+              {/* ... user dropdown content ... */}
               <DropdownMenuTrigger asChild>
                 <button className="flex items-center gap-2 p-1 rounded-full hover:bg-slate-50 transition-colors outline-none group">
                   <Avatar className="h-8 w-8 border border-border">
@@ -166,6 +167,16 @@ export default function Navbar() {
                   </div>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
+                {user.role === "student" && (
+                  <DropdownMenuItem onClick={() => nav("/profile")} className="cursor-pointer">
+                    <Avatar className="mr-2 h-4 w-4">
+                      <AvatarFallback className="bg-[#194BFB] text-white text-[8px] font-bold">
+                        {getInitials(user.name)}
+                      </AvatarFallback>
+                    </Avatar>
+                    <span>Profile</span>
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem onClick={() => setIsPasswordModalOpen(true)} className="cursor-pointer">
                   <KeyRound className="mr-2 h-4 w-4" />
                   <span>Change Password</span>
@@ -193,13 +204,13 @@ export default function Navbar() {
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-          ) : (
+          ) : location.pathname !== "/login" ? (
             <div className="flex items-center gap-2">
               <Button asChild size="sm" className="rounded-sm bg-[#194BFB] hover:bg-[#0F3AE5]">
                 <Link to="/login">Login</Link>
               </Button>
             </div>
-          )}
+          ) : null}
         </div>
       </div>
 

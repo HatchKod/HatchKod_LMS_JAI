@@ -232,6 +232,32 @@ class ProblemSubmitIn(BaseModel):
     language: str = "java"
 
 
+class StudentProfileIn(BaseModel):
+    phone: Optional[str] = None
+    whatsapp: Optional[str] = None
+    date_of_birth: Optional[str] = None  # Renamed from dob
+    gender: Optional[str] = None
+    work_experience: Optional[str] = None
+    career_gap: Optional[int] = 0        # Changed to int
+    current_city: Optional[str] = None
+    current_state: Optional[str] = None
+    preferred_locations: List[str] = []
+    github_url: Optional[str] = None
+    linkedin_url: Optional[str] = None
+    resume_url: Optional[str] = None
+    profile_picture_url: Optional[str] = None
+    profile_completion: Optional[int] = 0
+
+
+class StudentAcademicIn(BaseModel):
+    institution_name: str
+    year_of_passout: str                # Changed to str
+    marks_percentage: float
+    university_roll_no: Optional[str] = None
+    course_name: Optional[str] = None
+    branch: Optional[str] = None
+
+
 # -------------------- Auth Endpoints --------------------
 @api.post("/auth/register")
 async def register(payload: RegisterIn, response: Response, background_tasks: BackgroundTasks):
@@ -806,6 +832,116 @@ async def deactivate_user(user_id: str, _: dict = Depends(require_roles("admin")
         supabase.table("submissions").update({"mentor_id": None}).eq("mentor_id", user_id).in_("status", ["pending", "rework"]).execute()
         
     return {"ok": True}
+
+
+# -------------------- Student Profile --------------------
+@api.get("/students/profile")
+async def get_student_profile(user: dict = Depends(require_roles("student"))):
+    try:
+        user_id = user.get("id")
+        if not user_id:
+            raise HTTPException(status_code=400, detail="User ID missing from session")
+
+        # Fetch profile - handle potential errors gracefully
+        try:
+            profile_query = supabase.table("student_profiles").select("*").eq("user_id", user_id).execute()
+            profile = profile_query.data[0] if profile_query.data else None
+        except Exception as pe:
+            logger.error(f"Error querying student_profiles for {user_id}: {pe}")
+            profile = None # Fallback to None if table doesn't exist or query fails
+
+        # Fetch academics - handle potential errors gracefully
+        try:
+            academics_query = supabase.table("student_academics").select("*").eq("user_id", user_id).execute()
+            academics = academics_query.data or []
+        except Exception as ae:
+            logger.error(f"Error querying student_academics for {user_id}: {ae}")
+            academics = [] # Fallback to empty list
+
+        return {
+            "user": {
+                "id": user_id,
+                "name": user.get("name", "Unknown"),
+                "email": user.get("email", "")
+            },
+            "profile": profile,
+            "academics": academics
+        }
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        logger.error(f"Unexpected error in get_student_profile: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
+
+
+@api.post("/students/profile")
+async def create_student_profile(payload: StudentProfileIn, user: dict = Depends(require_roles("student"))):
+    try:
+        existing = get_single_or_none(supabase.table("student_profiles").select("user_id").eq("user_id", user["id"]))
+        if existing:
+            raise HTTPException(status_code=400, detail="Profile already exists")
+        
+        doc = payload.dict()
+        doc["user_id"] = user["id"]
+        doc["created_at"] = iso(now_utc())
+        doc["updated_at"] = iso(now_utc())
+        
+        supabase.table("student_profiles").insert(doc).execute()
+        return {"ok": True}
+    except Exception as e:
+        logger.error(f"Profile creation error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api.patch("/students/profile")
+async def update_student_profile(payload: StudentProfileIn, user: dict = Depends(require_roles("student"))):
+    try:
+        user_id = user["id"]
+        profile = get_single_or_none(supabase.table("student_profiles").select("user_id").eq("user_id", user_id))
+        
+        # Calculate completion percentage server-side if possible, or just trust payload
+        update_data = payload.dict(exclude_unset=True)
+        update_data["updated_at"] = iso(now_utc())
+        
+        if not profile:
+            update_data["user_id"] = user_id
+            update_data["created_at"] = iso(now_utc())
+            supabase.table("student_profiles").insert(update_data).execute()
+        else:
+            supabase.table("student_profiles").update(update_data).eq("user_id", user_id).execute()
+        
+        return {"ok": True}
+    except Exception as e:
+        logger.error(f"Profile update error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api.patch("/students/academics/{level}")
+async def upsert_student_academic(level: str, payload: StudentAcademicIn, user: dict = Depends(require_roles("student"))):
+    try:
+        if level not in ["10th", "12th", "UG", "PG"]:
+            raise HTTPException(status_code=400, detail="Invalid academic level")
+            
+        existing = get_single_or_none(supabase.table("student_academics").select("id").eq("user_id", user["id"]).eq("level", level))
+        
+        doc = payload.dict()
+        doc["user_id"] = user["id"]
+        doc["level"] = level
+        doc["updated_at"] = iso(now_utc())
+        
+        if existing:
+            supabase.table("student_academics").update(doc).eq("id", existing["id"]).execute()
+        else:
+            doc["id"] = str(uuid.uuid4())
+            doc["created_at"] = iso(now_utc())
+            supabase.table("student_academics").insert(doc).execute()
+            
+        return {"ok": True}
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        logger.error(f"Academic upsert error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @api.get("/users/inactive")
