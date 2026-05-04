@@ -2,8 +2,11 @@ import { Link } from "react-router-dom";
 import { Button } from "../components/ui/button";
 import { ArrowRight, Code2, GitBranch, ShieldCheck, Workflow } from "lucide-react";
 import Navbar from "../components/Navbar";
+import { useAuth } from "../lib/auth";
 
 export default function Landing() {
+  const { user } = useAuth();
+
   return (
     <div className="min-h-screen bg-white">
       <Navbar />
@@ -25,7 +28,9 @@ export default function Landing() {
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <Button asChild size="lg" className="rounded-sm bg-[#194BFB] hover:bg-[#0F3AE5]" data-testid="hero-cta-login">
-                <Link to="/login">Sign In <ArrowRight className="ml-2 h-4 w-4" /></Link>
+                <Link to={user ? "/dashboard" : "/login"}>
+                  {user ? "Go to Dashboard" : "Sign In"} <ArrowRight className="ml-2 h-4 w-4" />
+                </Link>
               </Button>
             </div>
             <div className="mt-12 grid grid-cols-2 sm:grid-cols-4 gap-px bg-border border border-border">

@@ -5,7 +5,7 @@ import { api } from "../lib/api";
 import { Card } from "../components/ui/card";
 import { Progress } from "../components/ui/progress";
 import { Button } from "../components/ui/button";
-import { ArrowRight, BookOpen, ListChecks, Flame } from "lucide-react";
+import { ArrowRight, BookOpen, ListChecks, Flame, Clock } from "lucide-react";
 import StatusPill from "../components/StatusPill";
 
 export default function StudentDashboard() {
@@ -43,30 +43,45 @@ export default function StudentDashboard() {
           <Stat label="Momentum" value="On Track" Icon={Flame} />
         </div>
 
-        {data.next_lesson && (
-          <Card className="mt-8 rounded-sm border-border overflow-hidden" data-testid="continue-learning-card">
-            <div className="grid grid-cols-1 md:grid-cols-3">
-              <div className="md:col-span-2 p-6">
-                <div className="text-[10px] uppercase tracking-[0.22em] text-slate-500">Next Up</div>
-                <div className="mt-2 font-[Outfit] text-2xl font-semibold tracking-tight" data-testid="next-lesson-title">
-                  {data.next_lesson.lesson.title}
+        {data.next_lesson && (() => {
+          const pending = data.pending_submissions.find(s => s.lesson_id === data.next_lesson.lesson.id);
+          return (
+            <Card className="mt-8 rounded-sm border-border overflow-hidden" data-testid="continue-learning-card">
+              <div className="grid grid-cols-1 md:grid-cols-3">
+                <div className="md:col-span-2 p-6">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="text-[10px] uppercase tracking-[0.22em] text-slate-500 font-bold">Next Up</div>
+                    {pending && (
+                      <div className="bg-amber-50 text-[#F59E0B] border border-amber-100 px-2 py-0.5 rounded-sm text-[9px] font-bold uppercase tracking-widest flex items-center gap-1">
+                        <Clock className="h-2.5 w-2.5" />
+                        Under Review
+                      </div>
+                    )}
+                  </div>
+                  <div className="mt-2 font-[Outfit] text-2xl font-semibold tracking-tight" data-testid="next-lesson-title">
+                    {data.next_lesson.lesson.title}
+                  </div>
+                  <div className="mt-1 text-sm text-slate-600">{data.next_lesson.course.title}</div>
+                  <Button asChild className={`mt-6 rounded-sm ${pending ? 'bg-slate-100 text-slate-900 hover:bg-slate-200 shadow-none border border-slate-200' : 'bg-[#194BFB] hover:bg-[#0F3AE5]'}`} data-testid="continue-learning-btn">
+                    <Link to={`/lesson/${data.next_lesson.lesson.id}`}>
+                      {pending ? "View Submission" : "Open lesson"} <ArrowRight className="ml-2 h-4 w-4" />
+                    </Link>
+                  </Button>
                 </div>
-                <div className="mt-1 text-sm text-slate-600">{data.next_lesson.course.title}</div>
-                <Button asChild className="mt-6 rounded-sm bg-[#194BFB] hover:bg-[#0F3AE5]" data-testid="continue-learning-btn">
-                  <Link to={`/lesson/${data.next_lesson.lesson.id}`}>
-                    Open lesson <ArrowRight className="ml-2 h-4 w-4" />
-                  </Link>
-                </Button>
+                <div className="border-l border-border bg-[#0A0A0A] text-white p-6 font-mono text-xs flex flex-col justify-end">
+                  <div className="text-slate-400">// status</div>
+                  <div className={`${pending ? 'text-amber-400' : 'text-emerald-400'} mt-1`}>
+                    ▸ {pending ? 'pending_approval' : 'ready_to_build'}
+                  </div>
+                  <div className="text-slate-400 mt-3">// next_action</div>
+                  <div className="text-[#9bb6ff] mt-1">
+                    {pending ? 'wait_for_mentor()' : 'open_lesson()'}
+                  </div>
+                </div>
               </div>
-              <div className="border-l border-border bg-[#0A0A0A] text-white p-6 font-mono text-xs flex flex-col justify-end">
-                <div className="text-slate-400">// status</div>
-                <div className="text-emerald-400 mt-1">▸ ready_to_build</div>
-                <div className="text-slate-400 mt-3">// next_action</div>
-                <div className="text-[#9bb6ff] mt-1">open_lesson()</div>
-              </div>
-            </div>
-          </Card>
-        )}
+            </Card>
+          );
+        })()}
 
         <h2 className="mt-12 text-xl sm:text-2xl font-semibold tracking-tight">My Courses</h2>
         <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">

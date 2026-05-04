@@ -402,19 +402,31 @@ async def get_course(course_id: str, user: dict = Depends(get_current_user)):
 
 @api.delete("/courses/{course_id}")
 async def delete_course(course_id: str, _: dict = Depends(require_roles("admin"))):
-    supabase.table("courses").delete().eq("id", course_id).execute()
+    # Get modules to find lessons
     mods = supabase.table("modules").select("id").eq("course_id", course_id).execute().data
     mod_ids = [m["id"] for m in mods]
     
-    lesson_ids = []
     if mod_ids:
+        # Get lessons to find tasks/subs
         lessons = supabase.table("lessons").select("id").in_("module_id", mod_ids).execute().data
         lesson_ids = [l["id"] for l in lessons]
-        supabase.table("modules").delete().eq("course_id", course_id).execute()
-        supabase.table("lessons").delete().in_("module_id", mod_ids).execute()
         
-    if lesson_ids:
-        supabase.table("tasks").delete().in_("lesson_id", lesson_ids).execute()
+        if lesson_ids:
+            # Delete lesson dependencies in correct FK order
+            # 1. Submissions (depends on tasks and lessons)
+            supabase.table("submissions").delete().in_("lesson_id", lesson_ids).execute()
+            # 2. Tasks (depends on lessons)
+            supabase.table("tasks").delete().in_("lesson_id", lesson_ids).execute()
+            # 3. Student Progress (depends on lessons)
+            supabase.table("student_progress").delete().in_("lesson_id", lesson_ids).execute()
+            # 4. Lessons
+            supabase.table("lessons").delete().in_("module_id", mod_ids).execute()
+        
+        # 5. Modules
+        supabase.table("modules").delete().eq("course_id", course_id).execute()
+
+    # 6. Course
+    supabase.table("courses").delete().eq("id", course_id).execute()
     return {"ok": True}
 
 
@@ -440,10 +452,15 @@ async def create_module(course_id: str, payload: ModuleIn, _: dict = Depends(req
 async def delete_module(module_id: str, _: dict = Depends(require_roles("admin"))):
     lessons = supabase.table("lessons").select("id").eq("module_id", module_id).execute().data
     lesson_ids = [l["id"] for l in lessons]
-    supabase.table("modules").delete().eq("id", module_id).execute()
-    supabase.table("lessons").delete().eq("module_id", module_id).execute()
+    
     if lesson_ids:
+        # Delete in correct FK order
+        supabase.table("submissions").delete().in_("lesson_id", lesson_ids).execute()
         supabase.table("tasks").delete().in_("lesson_id", lesson_ids).execute()
+        supabase.table("student_progress").delete().in_("lesson_id", lesson_ids).execute()
+        supabase.table("lessons").delete().eq("module_id", module_id).execute()
+        
+    supabase.table("modules").delete().eq("id", module_id).execute()
     return {"ok": True}
 
 
@@ -469,8 +486,22 @@ async def create_lesson(module_id: str, payload: LessonIn, _: dict = Depends(req
 
 @api.delete("/lessons/{lesson_id}")
 async def delete_lesson(lesson_id: str, _: dict = Depends(require_roles("admin"))):
-    supabase.table("lessons").delete().eq("id", lesson_id).execute()
+    # Delete in correct FK order
+    supabase.table("submissions").delete().eq("lesson_id", lesson_id).execute()
     supabase.table("tasks").delete().eq("lesson_id", lesson_id).execute()
+    supabase.table("student_progress").delete().eq("lesson_id", lesson_id).execute()
+    supabase.table("lessons").delete().eq("id", lesson_id).execute()
+    return {"ok": True}
+
+
+@api.patch("/lessons/{lesson_id}")
+async def update_lesson(lesson_id: str, payload: LessonIn, _: dict = Depends(require_roles("admin"))):
+    update_data = {
+        "title": payload.title,
+        "video_url": payload.video_url,
+        "content": payload.content,
+    }
+    supabase.table("lessons").update(update_data).eq("id", lesson_id).execute()
     return {"ok": True}
 
 
@@ -492,7 +523,43 @@ async def get_lesson(lesson_id: str, user: dict = Depends(get_current_user)):
     else:
         sub = None
 
-    return {"lesson": lesson, "module": module, "course": course, "task": task, "submission": sub}
+    # Get full course structure for navigator
+    course_data = await get_course(course["id"], user)
+    
+    # Navigation and index
+    ordered = await get_ordered_lessons(course["id"])
+    idx = next((i for i, l in enumerate(ordered) if l["id"] == lesson_id), -1)
+    
+    prev_lesson = ordered[idx - 1] if idx > 0 else None
+    next_lesson = ordered[idx + 1] if idx < len(ordered) - 1 else None
+    
+    return {
+        "lesson": lesson, 
+        "module": module, 
+        "course": course_data, 
+        "task": task, 
+        "submission": sub,
+        "prev_lesson": prev_lesson,
+        "next_lesson": next_lesson,
+        "lesson_index": idx + 1,
+        "total_lessons": len(ordered)
+    }
+
+
+@api.post("/lessons/{lesson_id}/complete")
+async def mark_lesson_complete(lesson_id: str, user: dict = Depends(require_roles("student"))):
+    # Check if lesson has a task. If it does, they MUST submit the task instead.
+    task = get_single_or_none(supabase.table("tasks").select("id").eq("lesson_id", lesson_id))
+    if task:
+        raise HTTPException(400, "This lesson has a task that must be submitted and approved.")
+    
+    supabase.table("student_progress").upsert({
+        "student_id": user["id"],
+        "lesson_id": lesson_id,
+        "is_completed": True,
+        "completed_at": iso(now_utc()),
+    }).execute()
+    return {"ok": True}
 
 
 # -------------------- Tasks --------------------
@@ -546,12 +613,19 @@ async def is_lesson_unlocked(student_id: str, lesson_id: str) -> bool:
     if idx <= 0:
         return True
     prev = ordered[idx - 1]
-    sub = get_single_or_none(supabase.table("submissions").select("*").eq("student_id", student_id).eq("lesson_id", prev["id"]).eq("status", "approved"))
-    # If previous lesson has no task, treat as auto-unlocked
-    prev_task = get_single_or_none(supabase.table("tasks").select("*").eq("lesson_id", prev["id"]))
+    
+    # Check if previously completed in student_progress (covers both tasks and content)
+    progress = get_single_or_none(supabase.table("student_progress").select("*").eq("student_id", student_id).eq("lesson_id", prev["id"]).eq("is_completed", True))
+    if progress:
+        return True
+
+    # Fallback: check if previous lesson has a task. If it doesn't, it should be unlocked.
+    # (Though it should have been caught by the progress check if they clicked 'Finish')
+    prev_task = get_single_or_none(supabase.table("tasks").select("id").eq("lesson_id", prev["id"]))
     if not prev_task:
         return True
-    return bool(sub)
+        
+    return False
 
 
 # -------------------- Submissions --------------------
