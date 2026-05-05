@@ -97,6 +97,13 @@ export default function ProblemDetailPage() {
       setSubmitResult(res.data);
       if (res.data.status === "accepted") {
         toast.success("Accepted! All test cases passed.");
+        if (res.data.gamification) {
+          setTimeout(() => {
+            toast.success(`+${res.data.gamification.xp_earned} XP earned! 🚀`, {
+              description: `Level ${res.data.gamification.level} • Streak: ${res.data.gamification.streak} days`
+            });
+          }, 500);
+        }
       } else {
         toast.error(`Submission status: ${res.data.status.replace('_', ' ')}`);
       }

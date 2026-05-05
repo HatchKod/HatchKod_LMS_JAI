@@ -143,7 +143,12 @@ export default function LessonView() {
     if (!isStudent) return;
     setBusy(true);
     try {
-      await api.post(`/lessons/${id}/complete`);
+      const res = await api.post(`/lessons/${id}/complete`);
+      if (res.data.gamification) {
+        toast.success(`+${res.data.gamification.xp_earned} XP earned! 🔥`, {
+          description: `You are now Level ${res.data.gamification.level} with a ${res.data.gamification.streak} day streak!`
+        });
+      }
       if (next_lesson) {
         navigate(`/lesson/${next_lesson.id}`);
       } else {

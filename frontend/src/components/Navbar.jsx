@@ -29,7 +29,8 @@ import {
   HelpCircle,
   MessageCircle,
   Mail,
-  Code2
+  Code2,
+  Trophy
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -167,6 +168,12 @@ export default function Navbar() {
                   </div>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
+                {user.role === "student" && (
+                  <DropdownMenuItem onClick={() => nav("/leaderboard")} className="cursor-pointer">
+                    <Trophy className="mr-2 h-4 w-4" />
+                    <span>Leaderboard</span>
+                  </DropdownMenuItem>
+                )}
                 {user.role === "student" && (
                   <DropdownMenuItem onClick={() => nav("/profile")} className="cursor-pointer">
                     <Avatar className="mr-2 h-4 w-4">

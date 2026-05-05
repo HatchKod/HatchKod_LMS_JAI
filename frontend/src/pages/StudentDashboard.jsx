@@ -5,7 +5,7 @@ import { api } from "../lib/api";
 import { Card } from "../components/ui/card";
 import { Progress } from "../components/ui/progress";
 import { Button } from "../components/ui/button";
-import { ArrowRight, BookOpen, ListChecks, Flame, Clock, Award } from "lucide-react";
+import { ArrowRight, BookOpen, ListChecks, Flame, Clock, Award, Target, Trophy } from "lucide-react";
 import { Avatar, AvatarFallback } from "../components/ui/avatar";
 import StatusPill from "../components/StatusPill";
 
@@ -62,10 +62,17 @@ export default function StudentDashboard() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-          <Stat label="Pending Tasks" value={data.pending_count} Icon={ListChecks} />
-          <Stat label="Active Courses" value={inprogressCourses.length} Icon={BookOpen} />
-          <Stat label="Momentum" value="On Track" Icon={Flame} />
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+          <Stat label="Total XP" value={`${data.gamification?.total_xp || 0} XP`} Icon={Award} />
+          <Stat label="Current Level" value={`Lvl ${data.gamification?.level || 1}`} Icon={Target} subtitle={`Next: ${100 - (data.gamification?.total_xp % 100)} XP`} />
+          <Stat label="Daily Streak" value={`${data.gamification?.streak || 0} Days`} Icon={Flame} />
+          <Stat 
+            label="Weekly Rank" 
+            value={data.gamification?.weekly_rank === "N/A" ? "N/A" : `#${data.gamification?.weekly_rank}`} 
+            Icon={Trophy} 
+            link="/leaderboard"
+            linkText="View Board"
+          />
         </div>
 
         {data.next_lesson && activeTab === "inprogress" && (() => {
@@ -243,14 +250,24 @@ function TabButton({ label, active, onClick }) {
   );
 }
 
-function Stat({ label, value, Icon }) {
-  return (
-    <div className="bg-white p-5">
-      <div className="flex items-center justify-between">
-        <span className="text-[10px] uppercase tracking-[0.22em] text-slate-500">{label}</span>
-        <Icon className="h-4 w-4 text-[#194BFB]" />
+function Stat({ label, value, Icon, subtitle, link, linkText }) {
+  const content = (
+    <div className="bg-white p-6 rounded-sm border border-slate-100 shadow-sm hover:shadow-md transition-all group">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-slate-400 group-hover:text-[#194BFB] transition-colors">{label}</span>
+        <div className="h-8 w-8 rounded-full bg-slate-50 flex items-center justify-center group-hover:bg-[#194BFB]/5 transition-colors">
+          <Icon className="h-4 w-4 text-slate-400 group-hover:text-[#194BFB]" />
+        </div>
       </div>
-      <div className="mt-2 font-[Outfit] text-3xl font-semibold tracking-tight">{value}</div>
+      <div className="font-['Outfit'] text-3xl font-black tracking-tight text-slate-900">{value}</div>
+      {subtitle && <div className="mt-1 text-[10px] font-bold text-slate-400 uppercase tracking-widest">{subtitle}</div>}
+      {link && (
+        <Link to={link} className="mt-4 flex items-center text-[10px] font-bold text-[#194BFB] uppercase tracking-widest hover:underline gap-1">
+          {linkText} <ArrowRight className="h-3 w-3" />
+        </Link>
+      )}
     </div>
   );
+
+  return content;
 }

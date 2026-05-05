@@ -103,6 +103,93 @@ def create_token(user_id: str, email: str, role: str) -> str:
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
+# -------------------- Gamification Logic --------------------
+def award_xp(user_id: str, action_type: str):
+    xp_map = {
+        "lesson_completed": 20,
+        "quiz_passed": 40,
+        "project_approved": 150,
+        "problem_solved": 50
+    }
+    xp_to_award = xp_map.get(action_type, 0)
+    if xp_to_award == 0:
+        return None
+
+    # Get user current stats
+    user = get_single_or_none(supabase.table("users").select("*").eq("id", user_id))
+    if not user:
+        return None
+
+    now = now_utc()
+    today = now.date()
+    last_active = None
+    if user.get("last_active_date"):
+        try:
+            last_active = datetime.strptime(user["last_active_date"], "%Y-%m-%d").date()
+        except:
+            last_active = None
+
+    # Calculate streak
+    current_streak = user.get("current_streak", 0)
+    if not last_active:
+        current_streak = 1
+    elif last_active == today:
+        pass # Already active today
+    elif last_active == today - timedelta(days=1):
+        current_streak += 1
+    else:
+        current_streak = 1
+    
+    # Calculate new total XP and Level
+    new_total_xp = (user.get("total_xp") or 0) + xp_to_award
+    new_level = (new_total_xp // 100) + 1
+
+    # Update user
+    supabase.table("users").update({
+        "total_xp": new_total_xp,
+        "level": new_level,
+        "current_streak": current_streak,
+        "last_active_date": today.isoformat(),
+        "updated_at": iso(now)
+    }).eq("id", user_id).execute()
+
+    # Log activity
+    supabase.table("user_activity").insert({
+        "user_id": user_id,
+        "action_type": action_type,
+        "xp_earned": xp_to_award,
+        "created_at": iso(now)
+    }).execute()
+
+    # Update weekly leaderboard
+    week_start = (today - timedelta(days=today.weekday())).isoformat()
+    existing_weekly = get_single_or_none(
+        supabase.table("leaderboard_weekly")
+        .select("*")
+        .eq("user_id", user_id)
+        .eq("week_start_date", week_start)
+    )
+    
+    if existing_weekly:
+        supabase.table("leaderboard_weekly").update({
+            "xp": (existing_weekly["xp"] or 0) + xp_to_award
+        }).eq("id", existing_weekly["id"]).execute()
+    else:
+        supabase.table("leaderboard_weekly").insert({
+            "user_id": user_id,
+            "week_start_date": week_start,
+            "xp": xp_to_award
+        }).execute()
+
+    return {
+        "xp_earned": xp_to_award, 
+        "total_xp": new_total_xp, 
+        "level": new_level, 
+        "streak": current_streak,
+        "action": action_type
+    }
+
+
 def set_auth_cookie(response: Response, token: str) -> None:
     response.set_cookie(
         key="access_token",
@@ -579,13 +666,21 @@ async def mark_lesson_complete(lesson_id: str, user: dict = Depends(require_role
     if task:
         raise HTTPException(400, "This lesson has a task that must be submitted and approved.")
     
+    # Check if already completed to avoid double XP
+    existing = get_single_or_none(supabase.table("student_progress").select("*").eq("student_id", user["id"]).eq("lesson_id", lesson_id).eq("is_completed", True))
+    
     supabase.table("student_progress").upsert({
         "student_id": user["id"],
         "lesson_id": lesson_id,
         "is_completed": True,
         "completed_at": iso(now_utc()),
     }).execute()
-    return {"ok": True}
+    
+    xp_data = None
+    if not existing:
+        xp_data = award_xp(user["id"], "lesson_completed")
+        
+    return {"ok": True, "gamification": xp_data}
 
 
 # -------------------- Tasks --------------------
@@ -803,6 +898,8 @@ async def review_submission(
             "is_completed": True,
             "completed_at": iso(now_utc()),
         }).execute()
+        # Award XP for project approval
+        award_xp(sub["student_id"], "project_approved")
     return get_single_or_none(supabase.table("submissions").select("*").eq("id", submission_id))
 
 
@@ -1058,12 +1155,32 @@ async def student_dashboard(user: dict = Depends(require_roles("student"))):
         for p in pending:
             p["lesson"] = p_lesson_map.get(p["lesson_id"])
 
+    # Get Weekly Rank - Robust against missing tables
+    rank = "N/A"
+    try:
+        today = now_utc().date()
+        week_start = (today - timedelta(days=today.weekday())).isoformat()
+        weekly_records = supabase.table("leaderboard_weekly").select("user_id, xp").eq("week_start_date", week_start).order("xp", desc=True).execute().data
+        
+        for i, rec in enumerate(weekly_records):
+            if rec["user_id"] == user["id"]:
+                rank = i + 1
+                break
+    except Exception as ge:
+        logger.error(f"Gamification rank error (likely missing tables): {ge}")
+
     return {
         "courses": result_courses,
         "next_lesson": next_lesson,
         "pending_submissions": pending,
         "pending_count": len(pending),
-        "mentor": mentor
+        "mentor": mentor,
+        "gamification": {
+            "total_xp": user.get("total_xp", 0),
+            "level": user.get("level", 1),
+            "streak": user.get("current_streak", 0),
+            "weekly_rank": rank
+        }
     }
 
 
@@ -1381,15 +1498,71 @@ async def submit_problem(id: str, payload: ProblemSubmitIn, user: dict = Depends
     }
     supabase.table("problem_submissions").insert(submission_doc).execute()
 
+    xp_data = None
+    if overall_status == "accepted":
+        # Check if already solved to avoid double XP
+        already_solved = supabase.table("problem_submissions").select("id").eq("student_id", user["id"]).eq("problem_id", id).eq("status", "accepted").execute().data
+        if len(already_solved) <= 1: # This is the first accepted submission
+            xp_data = award_xp(user["id"], "problem_solved")
+
     return {
         "status": overall_status,
-        "test_results": results
+        "test_results": results,
+        "gamification": xp_data
     }
 
 
-@api.get("/")
-async def root():
-    return {"service": "HatchKod LMS", "status": "ok"}
+@api.get("/gamification/leaderboard")
+async def get_weekly_leaderboard(user: dict = Depends(get_current_user)):
+    try:
+        today = now_utc().date()
+        week_start = (today - timedelta(days=today.weekday())).isoformat()
+        
+        # Fetch top 10
+        top_records = supabase.table("leaderboard_weekly")\
+            .select("xp, user:user_id(id, name, email)")\
+            .eq("week_start_date", week_start)\
+            .order("xp", desc=True)\
+            .limit(10)\
+            .execute().data
+        
+        # Format results
+        leaderboard = []
+        user_rank = None
+        
+        for i, rec in enumerate(top_records):
+            leaderboard.append({
+                "rank": i + 1,
+                "name": rec["user"]["name"],
+                "xp": rec["xp"],
+                "is_me": rec["user"]["id"] == user["id"]
+            })
+        
+        # If user is not in top 10, find their rank
+        if not any(entry["is_me"] for entry in leaderboard):
+            all_records = supabase.table("leaderboard_weekly")\
+                .select("user_id")\
+                .eq("week_start_date", week_start)\
+                .order("xp", desc=True)\
+                .execute().data
+            for i, rec in enumerate(all_records):
+                if rec["user_id"] == user["id"]:
+                    user_rank = i + 1
+                    break
+        
+        return {
+            "week_start": week_start,
+            "leaderboard": leaderboard,
+            "user_rank": user_rank
+        }
+    except Exception as e:
+        logger.error(f"Leaderboard error: {e}")
+        return {
+            "week_start": None,
+            "leaderboard": [],
+            "user_rank": "N/A",
+            "error": "Leaderboard tables not found. Please run the SQL schema."
+        }
 
 
 app.include_router(api)

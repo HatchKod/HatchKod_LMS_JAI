@@ -18,6 +18,7 @@ import ProblemLibraryPage from "./pages/ProblemLibraryPage";
 import ProblemDetailPage from "./pages/ProblemDetailPage";
 import ProblemManagementPage from "./pages/admin/ProblemManagementPage";
 import ProfilePage from "./pages/ProfilePage";
+import Leaderboard from "./pages/Leaderboard";
 
 
 export default function App() {
@@ -35,6 +36,9 @@ export default function App() {
               } />
               <Route path="/profile" element={
                 <ProtectedRoute roles={["student"]}><ProfilePage /></ProtectedRoute>
+              } />
+              <Route path="/leaderboard" element={
+                <ProtectedRoute roles={["student"]}><Leaderboard /></ProtectedRoute>
               } />
               <Route path="/course/:id" element={
                 <ProtectedRoute roles={["student", "mentor", "admin"]}><CourseView /></ProtectedRoute>
