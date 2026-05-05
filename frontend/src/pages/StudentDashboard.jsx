@@ -5,11 +5,13 @@ import { api } from "../lib/api";
 import { Card } from "../components/ui/card";
 import { Progress } from "../components/ui/progress";
 import { Button } from "../components/ui/button";
-import { ArrowRight, BookOpen, ListChecks, Flame, Clock } from "lucide-react";
+import { ArrowRight, BookOpen, ListChecks, Flame, Clock, Award } from "lucide-react";
+import { Avatar, AvatarFallback } from "../components/ui/avatar";
 import StatusPill from "../components/StatusPill";
 
 export default function StudentDashboard() {
   const [data, setData] = useState(null);
+  const [activeTab, setActiveTab] = useState("inprogress");
 
   useEffect(() => {
     (async () => {
@@ -29,97 +31,192 @@ export default function StudentDashboard() {
     );
   }
 
+  const inprogressCourses = data.courses.filter(c => c.progress < 100);
+  const completedCourses = data.courses.filter(c => c.progress === 100);
+  const currentCourses = activeTab === "inprogress" ? inprogressCourses : completedCourses;
+
   return (
-    <div className="min-h-screen bg-white" data-testid="student-dashboard">
+    <div className="min-h-screen bg-[#F8FAFC]" data-testid="student-dashboard">
       <Navbar />
       <div className="mx-auto max-w-7xl px-4 sm:px-6 py-8 fade-in">
-        <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500 mb-2">Student Console</div>
-        <h1 className="text-3xl sm:text-4xl font-bold tracking-tight" data-testid="dashboard-heading">Continue Learning</h1>
-        <p className="mt-1 text-slate-600 text-sm">Pick up where you left off and keep your streak alive.</p>
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
+          <div>
+            <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500 mb-2">Student Console</div>
+            <h1 className="text-3xl sm:text-4xl font-bold tracking-tight" data-testid="dashboard-heading">
+              Welcome back, {data.mentor ? "ready to build?" : "ready to start?"}
+            </h1>
+            <p className="mt-1 text-slate-600 text-sm">Pick up where you left off and keep your streak alive.</p>
+          </div>
+          
+          <div className="flex items-center gap-1 bg-slate-200/50 p-1 rounded-sm border border-slate-200">
+            <TabButton 
+              label={`Inprogress (${inprogressCourses.length})`} 
+              active={activeTab === "inprogress"} 
+              onClick={() => setActiveTab("inprogress")} 
+            />
+            <TabButton 
+              label={`Completed (${completedCourses.length})`} 
+              active={activeTab === "completed"} 
+              onClick={() => setActiveTab("completed")} 
+            />
+          </div>
+        </div>
 
-        <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-px bg-border border border-border">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           <Stat label="Pending Tasks" value={data.pending_count} Icon={ListChecks} />
-          <Stat label="Active Courses" value={data.courses.length} Icon={BookOpen} />
+          <Stat label="Active Courses" value={inprogressCourses.length} Icon={BookOpen} />
           <Stat label="Momentum" value="On Track" Icon={Flame} />
         </div>
 
-        {data.next_lesson && (() => {
+        {data.next_lesson && activeTab === "inprogress" && (() => {
           const pending = data.pending_submissions.find(s => s.lesson_id === data.next_lesson.lesson.id);
           return (
-            <Card className="mt-8 rounded-sm border-border overflow-hidden" data-testid="continue-learning-card">
-              <div className="grid grid-cols-1 md:grid-cols-3">
-                <div className="md:col-span-2 p-6">
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className="text-[10px] uppercase tracking-[0.22em] text-slate-500 font-bold">Next Up</div>
-                    {pending && (
-                      <div className="bg-amber-50 text-[#F59E0B] border border-amber-100 px-2 py-0.5 rounded-sm text-[9px] font-bold uppercase tracking-widest flex items-center gap-1">
-                        <Clock className="h-2.5 w-2.5" />
-                        Under Review
-                      </div>
-                    )}
+            <div className="mb-12">
+              <div className="text-[10px] uppercase tracking-[0.22em] text-slate-400 font-bold mb-4">CONTINUE LEARNING</div>
+              <Card className="rounded-sm border-border overflow-hidden bg-white shadow-sm" data-testid="continue-learning-card">
+                <div className="grid grid-cols-1 md:grid-cols-3">
+                  <div className="md:col-span-2 p-8">
+                    <div className="flex items-center gap-3 mb-3">
+                      {pending ? (
+                        <div className="bg-amber-50 text-[#F59E0B] border border-amber-100 px-2 py-0.5 rounded-sm text-[9px] font-bold uppercase tracking-widest flex items-center gap-1">
+                          <Clock className="h-2.5 w-2.5" />
+                          Under Review
+                        </div>
+                      ) : (
+                        <StatusPill status="ready_to_build" />
+                      )}
+                      <span className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">{data.next_lesson.course.title}</span>
+                    </div>
+                    <div className="font-[Outfit] text-2xl font-bold tracking-tight text-slate-900" data-testid="next-lesson-title">
+                      {data.next_lesson.lesson.title}
+                    </div>
+                    <p className="mt-2 text-sm text-slate-500 line-clamp-1 italic">"The only way to learn a new programming language is by writing programs in it."</p>
+                    <Button asChild className={`mt-8 rounded-sm px-8 h-12 ${pending ? 'bg-slate-100 text-slate-900 hover:bg-slate-200 shadow-none border border-slate-200' : 'bg-[#194BFB] hover:bg-[#0F3AE5]'}`} data-testid="continue-learning-btn">
+                      <Link to={`/lesson/${data.next_lesson.lesson.id}`}>
+                        {pending ? "View Submission" : "Resume Lesson"} <ArrowRight className="ml-2 h-4 w-4" />
+                      </Link>
+                    </Button>
                   </div>
-                  <div className="mt-2 font-[Outfit] text-2xl font-semibold tracking-tight" data-testid="next-lesson-title">
-                    {data.next_lesson.lesson.title}
+                  <div className="border-l border-border bg-[#0A0A0A] text-white p-8 font-mono text-xs flex flex-col justify-center">
+                    <div className="text-slate-500">// system_status</div>
+                    <div className={`${pending ? 'text-amber-400' : 'text-emerald-400'} mt-1`}>▸ {pending ? 'pending_approval' : 'ready_to_build'}</div>
+                    <div className="text-slate-500 mt-4">// next_execution</div>
+                    <div className="text-[#9bb6ff] mt-1 italic cursor-pointer hover:underline">
+                      {pending ? 'wait_for_mentor()' : `open_lesson("${data.next_lesson.lesson.title.toLowerCase().replace(/ /g, "_")}")`}
+                    </div>
+                    <div className="mt-8 pt-4 border-t border-white/10 flex items-center gap-2 text-slate-400">
+                      <div className={`h-2 w-2 rounded-full ${pending ? 'bg-amber-500' : 'bg-emerald-500'} animate-pulse`}></div>
+                      <span>{pending ? 'Waiting' : 'Active Session'}</span>
+                    </div>
                   </div>
-                  <div className="mt-1 text-sm text-slate-600">{data.next_lesson.course.title}</div>
-                  <Button asChild className={`mt-6 rounded-sm ${pending ? 'bg-slate-100 text-slate-900 hover:bg-slate-200 shadow-none border border-slate-200' : 'bg-[#194BFB] hover:bg-[#0F3AE5]'}`} data-testid="continue-learning-btn">
-                    <Link to={`/lesson/${data.next_lesson.lesson.id}`}>
-                      {pending ? "View Submission" : "Open lesson"} <ArrowRight className="ml-2 h-4 w-4" />
-                    </Link>
-                  </Button>
                 </div>
-                <div className="border-l border-border bg-[#0A0A0A] text-white p-6 font-mono text-xs flex flex-col justify-end">
-                  <div className="text-slate-400">// status</div>
-                  <div className={`${pending ? 'text-amber-400' : 'text-emerald-400'} mt-1`}>
-                    ▸ {pending ? 'pending_approval' : 'ready_to_build'}
-                  </div>
-                  <div className="text-slate-400 mt-3">// next_action</div>
-                  <div className="text-[#9bb6ff] mt-1">
-                    {pending ? 'wait_for_mentor()' : 'open_lesson()'}
-                  </div>
-                </div>
-              </div>
-            </Card>
+              </Card>
+            </div>
           );
         })()}
 
-        <h2 className="mt-12 text-xl sm:text-2xl font-semibold tracking-tight">My Courses</h2>
-        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-          {data.courses.map(({ course, progress, completed_lessons, total_lessons }) => (
-            <Card key={course.id} className="rounded-sm border-border p-5" data-testid={`course-card-${course.id}`}>
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <div className="text-[10px] uppercase tracking-[0.22em] text-slate-500">Course</div>
-                  <div className="mt-1 font-[Outfit] text-lg font-semibold">{course.title}</div>
-                  <div className="mt-1 text-sm text-slate-600 line-clamp-2">{course.description}</div>
-                </div>
-                <div className="font-mono text-xs text-slate-500 whitespace-nowrap">{completed_lessons}/{total_lessons}</div>
-              </div>
-              <div className="mt-4 flex items-center gap-3">
-                <Progress value={progress} className="h-1.5 rounded-sm" />
-                <span className="font-mono text-xs text-slate-700">{progress}%</span>
-              </div>
-              <Button asChild variant="outline" className="mt-4 rounded-sm" data-testid={`open-course-${course.id}`}>
-                <Link to={`/course/${course.id}`}>View Course</Link>
-              </Button>
-            </Card>
-          ))}
-          {data.courses.length === 0 && (
-            <div className="text-sm text-slate-500" data-testid="no-courses">No courses available yet.</div>
-          )}
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-bold tracking-tight text-slate-900">
+            {activeTab === "inprogress" ? "My Courses" : "Completed Excellence"}
+          </h2>
         </div>
 
-        <h2 className="mt-12 text-xl sm:text-2xl font-semibold tracking-tight">Pending Submissions</h2>
-        <div className="mt-4 border border-border rounded-sm overflow-hidden">
+        <div className="grid grid-cols-1 gap-6">
+          {currentCourses.map(({ course, progress, completed_lessons, total_lessons, module_count }) => (
+            <Card key={course.id} className="rounded-sm border-border bg-white p-0 overflow-hidden shadow-sm hover:shadow-md transition-shadow group" data-testid={`course-card-${course.id}`}>
+              <div className="flex flex-col md:flex-row">
+                {/* Left Side: Course Info */}
+                <div className="flex-1 p-6 md:p-8">
+                  <div className="flex items-start justify-between gap-4 mb-4">
+                    <div>
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-[9px] uppercase tracking-[0.2em] font-bold text-[#194BFB] bg-[#194BFB]/5 px-2 py-0.5 rounded">
+                          {course.status}
+                        </span>
+                        <span className="text-[9px] uppercase tracking-[0.2em] font-bold text-slate-400">
+                          {module_count} Modules • {total_lessons} Lessons
+                        </span>
+                      </div>
+                      <h3 className="font-[Outfit] text-2xl font-bold text-slate-900 group-hover:text-[#194BFB] transition-colors">{course.title}</h3>
+                      <p className="mt-2 text-sm text-slate-500 line-clamp-2 max-w-2xl">{course.description}</p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mt-8">
+                    <div className="space-y-1">
+                      <div className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">MENTOR</div>
+                      <div className="flex items-center gap-2">
+                        <Avatar className="h-6 w-6">
+                          <AvatarFallback className="bg-slate-100 text-slate-600 text-[8px] font-bold">
+                            {data.mentor ? data.mentor.name.split(" ").map(n => n[0]).join("") : "??"}
+                          </AvatarFallback>
+                        </Avatar>
+                        <span className="text-xs font-semibold text-slate-700">{data.mentor?.name || "Unassigned"}</span>
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <div className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">START DATE</div>
+                      <div className="text-xs font-semibold text-slate-700">{new Date(course.created_at).toLocaleDateString()}</div>
+                    </div>
+                    <div className="space-y-1">
+                      <div className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">COURSE TYPE</div>
+                      <div className="text-xs font-semibold text-slate-700">Engineering</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right Side: Progress & Actions */}
+                <div className="md:w-72 bg-slate-50 p-6 md:p-8 flex flex-col justify-between border-l border-border">
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Progress</span>
+                      <span className="font-mono text-sm font-bold text-slate-900">{progress}%</span>
+                    </div>
+                    <Progress value={progress} className="h-2 rounded-full bg-slate-200" />
+                    <div className="mt-2 text-[10px] text-right text-slate-400 font-medium">
+                      {completed_lessons} of {total_lessons} tasks approved
+                    </div>
+                  </div>
+
+                  <div className="mt-8 flex flex-col gap-2">
+                    <Button asChild className="w-full rounded-sm bg-[#194BFB] hover:bg-[#0F3AE5] h-10 shadow-sm" data-testid={`open-course-${course.id}`}>
+                      <Link to={`/course/${course.id}`}>Continue Learning</Link>
+                    </Button>
+                    <Button asChild variant="outline" className="w-full rounded-sm border-slate-300 hover:bg-white h-10 text-slate-600">
+                      <Link to={`/course/${course.id}`}>View Syllabus</Link>
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </Card>
+          ))}
+          {currentCourses.length === 0 && (activeTab === "inprogress" ? (
+            <Card className="p-12 text-center border-dashed bg-white">
+              <BookOpen className="h-12 w-12 text-slate-200 mx-auto mb-4" />
+              <p className="text-sm text-slate-500" data-testid="no-courses">No active courses. Time to start something new!</p>
+            </Card>
+          ) : (
+            <Card className="p-12 text-center border-dashed bg-white">
+              <Award className="h-12 w-12 text-slate-200 mx-auto mb-4" />
+              <p className="text-sm text-slate-500">No completed courses yet. Keep pushing!</p>
+            </Card>
+          ))}
+        </div>
+
+        <h2 className="mt-16 text-xl font-bold tracking-tight text-slate-900 mb-6 flex items-center gap-2">
+          <ListChecks className="h-5 w-5 text-[#194BFB]" />
+          Pending Submissions
+        </h2>
+        <div className="bg-white border border-border rounded-sm overflow-hidden shadow-sm">
           {data.pending_submissions.length === 0 ? (
-            <div className="p-6 text-sm text-slate-500" data-testid="no-pending">All caught up. Nothing pending.</div>
+            <div className="p-12 text-center text-sm text-slate-400 italic" data-testid="no-pending">All caught up. Nothing pending.</div>
           ) : (
             data.pending_submissions.map((s) => (
               <Link key={s.id} to={`/lesson/${s.lesson_id}`}
-                className="flex items-center justify-between p-4 border-b last:border-b-0 border-border hover:bg-slate-50" data-testid={`pending-row-${s.id}`}>
+                className="flex items-center justify-between p-5 border-b last:border-b-0 border-border hover:bg-slate-50 transition-colors group" data-testid={`pending-row-${s.id}`}>
                 <div>
-                  <div className="font-medium">{s.lesson?.title || "Lesson"}</div>
-                  <div className="text-xs text-slate-500 font-mono">submitted {new Date(s.submitted_at).toLocaleString()}</div>
+                  <div className="font-bold text-slate-800 group-hover:text-[#194BFB]">{s.lesson?.title || "Lesson"}</div>
+                  <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-1">submitted {new Date(s.submitted_at).toLocaleString()}</div>
                 </div>
                 <StatusPill status={s.status} />
               </Link>
@@ -128,6 +225,21 @@ export default function StudentDashboard() {
         </div>
       </div>
     </div>
+  );
+}
+
+function TabButton({ label, active, onClick }) {
+  return (
+    <button 
+      onClick={onClick}
+      className={`px-4 py-1.5 text-xs font-bold rounded transition-all ${
+        active 
+          ? "bg-white text-slate-900 shadow-sm border border-slate-200" 
+          : "text-slate-500 hover:text-slate-700"
+      }`}
+    >
+      {label}
+    </button>
   );
 }
 

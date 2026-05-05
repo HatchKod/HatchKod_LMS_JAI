@@ -174,7 +174,7 @@ export default function Navbar() {
                         {getInitials(user.name)}
                       </AvatarFallback>
                     </Avatar>
-                    <span>Profile</span>
+                    <span>My Profile</span>
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuItem onClick={() => setIsPasswordModalOpen(true)} className="cursor-pointer">

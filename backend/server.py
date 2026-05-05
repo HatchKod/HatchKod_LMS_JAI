@@ -1020,9 +1020,15 @@ async def student_dashboard(user: dict = Depends(require_roles("student"))):
     for l in all_lessons:
         lessons_by_module.setdefault(l["module_id"], []).append(l)
 
+    # Get mentor info
+    mentor = None
+    if user.get("assigned_mentor_id"):
+        mentor = get_single_or_none(supabase.table("users").select("id, name, email").eq("id", user["assigned_mentor_id"]))
+
     for c in courses:
+        c_modules = modules_by_course.get(c["id"], [])
         ordered = []
-        for m in modules_by_course.get(c["id"], []):
+        for m in c_modules:
             ordered.extend(lessons_by_module.get(m["id"], []))
         total = len(ordered)
         completed = 0
@@ -1038,6 +1044,7 @@ async def student_dashboard(user: dict = Depends(require_roles("student"))):
             "progress": progress,
             "total_lessons": total,
             "completed_lessons": completed,
+            "module_count": len(c_modules),
             "next_lesson": first_unfinished,
         })
         if next_lesson is None and first_unfinished is not None:
@@ -1056,6 +1063,26 @@ async def student_dashboard(user: dict = Depends(require_roles("student"))):
         "next_lesson": next_lesson,
         "pending_submissions": pending,
         "pending_count": len(pending),
+        "mentor": mentor
+    }
+
+
+@api.get("/auth/profile")
+async def get_profile(user: dict = Depends(get_current_user)):
+    # Fetch mentor if exists
+    mentor = None
+    if user.get("assigned_mentor_id"):
+        mentor = get_single_or_none(supabase.table("users").select("id, name, email").eq("id", user["assigned_mentor_id"]))
+    
+    # Stats
+    progress_count = supabase.table("student_progress").select("*", count="exact").eq("student_id", user["id"]).eq("is_completed", True).execute().count
+    
+    return {
+        "user": user,
+        "mentor": mentor,
+        "stats": {
+            "completed_lessons": progress_count
+        }
     }
 
 
