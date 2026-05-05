@@ -92,7 +92,7 @@ export default function LessonView() {
   const submit = async (e) => {
     e.preventDefault();
     setSubmissionError("");
-    
+
     let finalUrl = url;
     if (submissionType === "file") {
       if (!file && !data.submission) { setSubmissionError("Please select a file"); return; }
@@ -244,117 +244,117 @@ export default function LessonView() {
       <Navbar />
 
       <main className="max-w-6xl mx-auto py-8 px-6 min-h-[calc(100vh-120px)] flex flex-col">
-          <div className="mb-6">
-            <Sheet>
-              <SheetTrigger asChild>
-                <button className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-sm text-slate-600 hover:text-[#194BFB] hover:border-[#194BFB] transition-all whitespace-nowrap group text-[11px] font-bold uppercase tracking-wider">
-                  <BookOpen className="h-3.5 w-3.5 text-[#194BFB]" />
-                  <span>Module {lesson_index || 1}: {module?.title}</span>
-                  <ChevronRight className="h-3 w-3 ml-1 group-data-[state=open]:rotate-90 transition-transform" />
-                </button>
-              </SheetTrigger>
-              <SheetContent side="left" className="w-[400px] sm:w-[540px] p-0 border-r border-slate-200">
-                <SheetHeader className="p-6 border-b border-slate-100 bg-white sticky top-0 z-10">
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className="h-8 w-8 bg-[#194BFB]/5 rounded-sm flex items-center justify-center border border-[#194BFB]/10">
-                      <BookOpen className="h-4 w-4 text-[#194BFB]" />
-                    </div>
-                    <SheetTitle className="font-['Outfit'] font-extrabold text-2xl text-[#0A0A0A]">Course Syllabus</SheetTitle>
+        <div className="mb-6">
+          <Sheet>
+            <SheetTrigger asChild>
+              <button className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-sm text-slate-600 hover:text-[#194BFB] hover:border-[#194BFB] transition-all whitespace-nowrap group text-[11px] font-bold uppercase tracking-wider">
+                <BookOpen className="h-3.5 w-3.5 text-[#194BFB]" />
+                <span>Module {lesson_index || 1}: {module?.title}</span>
+                <ChevronRight className="h-3 w-3 ml-1 group-data-[state=open]:rotate-90 transition-transform" />
+              </button>
+            </SheetTrigger>
+            <SheetContent side="left" className="w-[400px] sm:w-[540px] p-0 border-r border-slate-200">
+              <SheetHeader className="p-6 border-b border-slate-100 bg-white sticky top-0 z-10">
+                <div className="flex items-center gap-3 mb-2">
+                  <div className="h-8 w-8 bg-[#194BFB]/5 rounded-sm flex items-center justify-center border border-[#194BFB]/10">
+                    <BookOpen className="h-4 w-4 text-[#194BFB]" />
                   </div>
-                  <p className="text-sm text-slate-500 font-medium">{course?.title}</p>
-                </SheetHeader>
-                <div className="overflow-y-auto h-[calc(100vh-120px)] p-6 bg-slate-50/30">
-                  <div className="space-y-8">
-                    {course?.modules?.map((m, mi) => (
-                      <div key={m.id} className="space-y-4">
-                        <div className="flex items-center gap-3">
-                          <div className="h-6 w-6 rounded-full bg-slate-900 text-white flex items-center justify-center text-[10px] font-bold">{mi + 1}</div>
-                          <h4 className="font-bold text-slate-900 uppercase tracking-wider text-xs">{m.title}</h4>
-                        </div>
-                        <div className="space-y-2 ml-9">
-                          {m.lessons?.map((l) => {
-                            const isCurrent = l.id === id;
-                            const isCompleted = l.completed;
-                            const isLocked = !l.unlocked && user?.role === 'student';
-                            return (
-                              <Link 
-                                key={l.id} 
-                                to={isLocked ? '#' : `/lesson/${l.id}`}
-                                className={`flex items-center justify-between p-3 rounded-sm border transition-all ${isCurrent ? 'bg-[#194BFB]/5 border-[#194BFB] ring-1 ring-[#194BFB]/10' : (isLocked ? 'bg-slate-50 border-slate-100 opacity-60 cursor-not-allowed' : 'bg-white border-slate-200 hover:border-[#194BFB] hover:shadow-sm')}`}
-                              >
-                                <div className="flex items-center gap-3 min-w-0">
-                                  <div className={`h-5 w-5 rounded-full flex items-center justify-center shrink-0 border ${isCompleted ? 'bg-emerald-500 border-emerald-500 text-white' : 'bg-white border-slate-200'}`}>
-                                    {isCompleted ? <Check className="h-3 w-3 stroke-[3]" /> : (isLocked ? <Lock className="h-2.5 w-2.5 text-slate-400" /> : <div className="h-1.5 w-1.5 rounded-full bg-slate-200" />)}
-                                  </div>
-                                  <span className={`text-sm font-bold truncate ${isCurrent ? 'text-[#194BFB]' : (isLocked ? 'text-slate-400' : 'text-slate-700')}`}>{l.title}</span>
-                                </div>
-                                {isCurrent && <div className="h-1.5 w-1.5 rounded-full bg-[#194BFB] animate-pulse" />}
-                              </Link>
-                            );
-                          })}
-                        </div>
+                  <SheetTitle className="font-['Outfit'] font-extrabold text-2xl text-[#0A0A0A]">Course Syllabus</SheetTitle>
+                </div>
+                <p className="text-sm text-slate-500 font-medium">{course?.title}</p>
+              </SheetHeader>
+              <div className="overflow-y-auto h-[calc(100vh-120px)] p-6 bg-slate-50/30">
+                <div className="space-y-8">
+                  {course?.modules?.map((m, mi) => (
+                    <div key={m.id} className="space-y-4">
+                      <div className="flex items-center gap-3">
+                        <div className="h-6 w-6 rounded-full bg-slate-900 text-white flex items-center justify-center text-[10px] font-bold">{mi + 1}</div>
+                        <h4 className="font-bold text-slate-900 uppercase tracking-wider text-xs">{m.title}</h4>
                       </div>
-                    ))}
-                  </div>
-                </div>
-              </SheetContent>
-            </Sheet>
-          </div>
-
-          <Breadcrumbs 
-            items={[
-              { label: course?.title, to: `/course/${course?.id}` },
-              { label: module?.title },
-              { label: lesson?.title }
-            ]} 
-          />
-
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center gap-3">
-              <div className="bg-blue-50 text-[#194BFB] px-3 py-1 rounded-sm text-[10px] font-bold uppercase tracking-wider flex items-center gap-2 border border-blue-100">
-                <BookOpen className="h-3 w-3" />
-                {mode === 'task' ? 'Homework' : 'Lesson'}
-              </div>
-              {submission?.status === 'approved' && (
-                <div className="bg-emerald-100 text-emerald-700 px-3 py-1 rounded-sm text-[10px] font-bold uppercase tracking-wider">
-                  Completed
-                </div>
-              )}
-            </div>
-
-            {lesson.video_url && (
-              <Dialog>
-                <DialogTrigger asChild>
-                  <Button size="sm" className="bg-[#194BFB] hover:bg-[#0F3AE5] text-white rounded-sm h-8 px-3 font-bold text-[10px] uppercase tracking-widest gap-2 shrink-0">
-                    <div className="h-4 w-4 rounded-full bg-white/20 flex items-center justify-center">
-                      <Video className="h-2.5 w-2.5" />
+                      <div className="space-y-2 ml-9">
+                        {m.lessons?.map((l) => {
+                          const isCurrent = l.id === id;
+                          const isCompleted = l.completed;
+                          const isLocked = !l.unlocked && user?.role === 'student';
+                          return (
+                            <Link
+                              key={l.id}
+                              to={isLocked ? '#' : `/lesson/${l.id}`}
+                              className={`flex items-center justify-between p-3 rounded-sm border transition-all ${isCurrent ? 'bg-[#194BFB]/5 border-[#194BFB] ring-1 ring-[#194BFB]/10' : (isLocked ? 'bg-slate-50 border-slate-100 opacity-60 cursor-not-allowed' : 'bg-white border-slate-200 hover:border-[#194BFB] hover:shadow-sm')}`}
+                            >
+                              <div className="flex items-center gap-3 min-w-0">
+                                <div className={`h-5 w-5 rounded-full flex items-center justify-center shrink-0 border ${isCompleted ? 'bg-emerald-500 border-emerald-500 text-white' : 'bg-white border-slate-200'}`}>
+                                  {isCompleted ? <Check className="h-3 w-3 stroke-[3]" /> : (isLocked ? <Lock className="h-2.5 w-2.5 text-slate-400" /> : <div className="h-1.5 w-1.5 rounded-full bg-slate-200" />)}
+                                </div>
+                                <span className={`text-sm font-bold truncate ${isCurrent ? 'text-[#194BFB]' : (isLocked ? 'text-slate-400' : 'text-slate-700')}`}>{l.title}</span>
+                              </div>
+                              {isCurrent && <div className="h-1.5 w-1.5 rounded-full bg-[#194BFB] animate-pulse" />}
+                            </Link>
+                          );
+                        })}
+                      </div>
                     </div>
-                    Recordings
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="max-w-4xl p-0 overflow-hidden bg-black border-none rounded-sm">
-                  <DialogHeader className="p-4 bg-white border-b border-border text-left">
-                    <DialogTitle className="text-sm font-bold flex items-center gap-2 uppercase tracking-wider">
-                      <Video className="h-4 w-4 text-[#194BFB]" />
-                      Session Recording — {lesson.title}
-                    </DialogTitle>
-                  </DialogHeader>
-                  <div className="aspect-video w-full">
-                    <iframe
-                      src={getEmbedUrl(lesson.video_url)}
-                      title={lesson.title}
-                      className="w-full h-full"
-                      allow="autoplay; encrypted-media; picture-in-picture"
-                      allowFullScreen
-                    />
-                  </div>
-                </DialogContent>
-              </Dialog>
+                  ))}
+                </div>
+              </div>
+            </SheetContent>
+          </Sheet>
+        </div>
+
+        <Breadcrumbs
+          items={[
+            { label: course?.title, to: `/course/${course?.id}` },
+            { label: module?.title },
+            { label: lesson?.title }
+          ]}
+        />
+
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-3">
+            <div className="bg-blue-50 text-[#194BFB] px-3 py-1 rounded-sm text-[10px] font-bold uppercase tracking-wider flex items-center gap-2 border border-blue-100">
+              <BookOpen className="h-3 w-3" />
+              {mode === 'task' ? 'Homework' : 'Lesson'}
+            </div>
+            {submission?.status === 'approved' && (
+              <div className="bg-emerald-100 text-emerald-700 px-3 py-1 rounded-sm text-[10px] font-bold uppercase tracking-wider">
+                Completed
+              </div>
             )}
           </div>
-          <h1 className="text-3xl font-extrabold tracking-tight text-[#0A0A0A] font-['Outfit'] mb-8">
-            {lesson.title}
-          </h1>
+
+          {lesson.video_url && (
+            <Dialog>
+              <DialogTrigger asChild>
+                <Button size="sm" className="bg-[#194BFB] hover:bg-[#0F3AE5] text-white rounded-sm h-8 px-3 font-bold text-[10px] uppercase tracking-widest gap-2 shrink-0">
+                  <div className="h-4 w-4 rounded-full bg-white/20 flex items-center justify-center">
+                    <Video className="h-2.5 w-2.5" />
+                  </div>
+                  Recordings
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-4xl p-0 overflow-hidden bg-black border-none rounded-sm">
+                <DialogHeader className="p-4 bg-white border-b border-border text-left">
+                  <DialogTitle className="text-sm font-bold flex items-center gap-2 uppercase tracking-wider">
+                    <Video className="h-4 w-4 text-[#194BFB]" />
+                    Session Recording — {lesson.title}
+                  </DialogTitle>
+                </DialogHeader>
+                <div className="aspect-video w-full">
+                  <iframe
+                    src={getEmbedUrl(lesson.video_url)}
+                    title={lesson.title}
+                    className="w-full h-full"
+                    allow="autoplay; encrypted-media; picture-in-picture"
+                    allowFullScreen
+                  />
+                </div>
+              </DialogContent>
+            </Dialog>
+          )}
+        </div>
+        <h1 className="text-3xl font-extrabold tracking-tight text-[#0A0A0A] font-['Outfit'] mb-8">
+          {lesson.title}
+        </h1>
 
         {mode === 'content' ? (
           <div className="prose prose-slate prose-lg max-w-4xl mx-auto pb-48">
@@ -376,7 +376,7 @@ export default function LessonView() {
                   </div>
                 )}
               </div>
-              
+
               <div className="p-8 space-y-10">
                 {/* Instructions */}
                 <div>
@@ -399,7 +399,7 @@ export default function LessonView() {
                 {/* Submission Area */}
                 <div className="pt-6 border-t border-slate-100">
                   <h4 className="text-[10px] uppercase font-bold text-slate-400 tracking-widest mb-6">Your Submission</h4>
-                  
+
                   {submission && !isEditing ? (
                     <div className="bg-slate-50 border border-slate-200 p-6 rounded-sm space-y-4">
                       <div className="flex items-center justify-between">
@@ -427,7 +427,7 @@ export default function LessonView() {
                           )}
                         </div>
                       </div>
-                      
+
                       {submission.mentor_feedback && (
                         <div className="mt-4 p-4 bg-orange-50/50 border border-orange-100 rounded-sm">
                           <div className="text-[10px] uppercase font-bold text-orange-600 tracking-wider mb-2">Mentor Feedback</div>

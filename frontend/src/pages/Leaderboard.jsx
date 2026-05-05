@@ -62,7 +62,7 @@ export default function Leaderboard() {
               </div>
               <div>
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Your Streak</p>
-                <p className="text-2xl font-black text-slate-900 font-['Outfit']">{user?.gamification?.streak || 0} Days</p>
+                <p className="text-2xl font-black text-slate-900 font-['Outfit']">{(data?.user_stats?.streak ?? user?.gamification?.streak) || 0} Days</p>
               </div>
             </CardContent>
           </Card>
@@ -86,7 +86,7 @@ export default function Leaderboard() {
               </div>
               <div>
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Your Level</p>
-                <p className="text-2xl font-black text-slate-900 font-['Outfit']">Lvl {user?.gamification?.level || 1}</p>
+                <p className="text-2xl font-black text-slate-900 font-['Outfit']">Lvl {(data?.user_stats?.level ?? user?.gamification?.level) || 1}</p>
               </div>
             </CardContent>
           </Card>
