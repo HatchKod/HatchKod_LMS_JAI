@@ -88,3 +88,7 @@ credentials.json
 *.pem
 *.key
 .credentials
+
+# Allow example env template to be committed
+!.env.example
+!**/.env.example
