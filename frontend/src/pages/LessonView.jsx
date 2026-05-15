@@ -7,20 +7,23 @@ import { Textarea } from "../components/ui/textarea";
 import { Label } from "../components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "../components/ui/dialog";
 import { Badge } from "../components/ui/badge";
-import { BookOpen, Video, ArrowLeft, Github, FileUp, Link2, ChevronLeft, ChevronRight, ClipboardCheck, FileText, Clock, Trash2, Edit3, RefreshCcw, Check, Lock } from "lucide-react";
+import { BookOpen, Video, ArrowLeft, Github, FileUp, Link2, ChevronLeft, ChevronRight, ClipboardCheck, FileText, Clock, Trash2, Edit3, RefreshCcw, Check, Lock, CheckCircle } from "lucide-react";
 import StatusPill from "../components/StatusPill";
 import { toast } from "sonner";
 import { useAuth } from "../lib/auth";
+import { supabase } from "../lib/supabase";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "../components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../components/ui/tooltip";
 import Navbar from "../components/Navbar";
 import Breadcrumbs from "../components/Breadcrumbs";
+import ReactMarkdown from "react-markdown";
 
 export default function LessonView() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const mode = searchParams.get("mode") || "content";
+  const classId = searchParams.get("classId");
   const { user } = useAuth();
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
@@ -33,6 +36,10 @@ export default function LessonView() {
   const [submissionError, setSubmissionError] = useState("");
   const [file, setFile] = useState(null);
   const [submissionType, setSubmissionType] = useState("link");
+  const [isCompleted, setIsCompleted] = useState(false);
+  const [completedAt, setCompletedAt] = useState(null);
+  const [isSyllabusOpen, setIsSyllabusOpen] = useState(false);
+  const startTimeRef = useRef(Date.now());
 
   const load = async () => {
     setError("");
@@ -58,8 +65,56 @@ export default function LessonView() {
     }
   };
 
+  // Check completion status and track time
+  useEffect(() => {
+    if (!user?.id || !id) return;
+    api.get(`/students/${user.id}/progress`).then(({ data }) => {
+      const allLessons = (data.modules || []).flatMap(m => m.lessons);
+      const found = allLessons.find(l => l.id === id);
+      if (found) {
+        setIsCompleted(found.is_completed);
+        setCompletedAt(found.completed_at);
+      }
+    }).catch(() => {});
+  }, [user?.id, id]);
+
+  // Time tracking via Page Visibility API
+  useEffect(() => {
+    if (user?.role !== "student") return;
+    startTimeRef.current = Date.now();
+    const handleVisibility = () => {
+      if (document.visibilityState === "hidden") {
+        const mins = Math.round((Date.now() - startTimeRef.current) / 60000);
+        if (mins > 0) {
+          api.post(`/lessons/${id}/complete`, { time_spent_minutes: mins }).catch(() => {});
+        }
+      } else {
+        startTimeRef.current = Date.now();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      const mins = Math.round((Date.now() - startTimeRef.current) / 60000);
+      if (mins > 0) {
+        api.post(`/lessons/${id}/complete`, { time_spent_minutes: mins }).catch(() => {});
+      }
+    };
+  }, [id, user?.role]);
+
   useEffect(() => {
     load();
+
+    // Listen for real-time updates from admin
+    const channel = supabase.channel(`lesson_view_${id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'lessons', filter: `id=eq.${id}` }, () => {
+        load();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [id]);
 
   useEffect(() => {
@@ -141,23 +196,38 @@ export default function LessonView() {
 
   const handleComplete = async () => {
     if (!isStudent) return;
+    const elapsed = Math.round((Date.now() - startTimeRef.current) / 60000);
     setBusy(true);
     try {
-      const res = await api.post(`/lessons/${id}/complete`);
+      const res = await api.post(`/lessons/${id}/complete`, { time_spent_minutes: elapsed });
       if (res.data.gamification) {
         toast.success(`+${res.data.gamification.xp_earned} XP earned! 🔥`, {
           description: `You are now Level ${res.data.gamification.level} with a ${res.data.gamification.streak} day streak!`
         });
+      } else {
+        toast.success("Lesson complete! Keep it up 🚀");
       }
+      setIsCompleted(true);
+      setCompletedAt(new Date().toISOString());
       if (next_lesson) {
         navigate(`/lesson/${next_lesson.id}`);
       } else {
-        navigate(`/course/${course.id}`);
+        navigate("/student/progress");
       }
     } catch (e) {
       toast.error(formatApiError(e.response?.data?.detail) || "Failed to complete lesson");
     } finally {
       setBusy(false);
+    }
+  };
+
+  const handleUndoComplete = async () => {
+    try {
+      await api.delete(`/lessons/${id}/complete`);
+      setIsCompleted(false);
+      setCompletedAt(null);
+    } catch {
+      toast.error("Failed to undo completion");
     }
   };
 
@@ -174,10 +244,22 @@ export default function LessonView() {
     );
   }
 
-  if (!data) return <div className="min-h-screen bg-[#F4F5F7] flex items-center justify-center text-slate-500">Loading lesson...</div>;
+  if (!data || !data.lesson) {
+    return (
+      <div className="min-h-screen bg-[#F4F5F7] flex flex-col items-center justify-center p-6 text-slate-500">
+        <RefreshCcw className="h-8 w-8 animate-spin mb-4 opacity-20" />
+        <div className="font-medium">Loading lesson content...</div>
+        {error && <div className="mt-4 text-xs text-red-400 bg-red-50 px-3 py-1 rounded-sm border border-red-100">{error}</div>}
+      </div>
+    );
+  }
 
   const { lesson, course, module, task, submission, prev_lesson, next_lesson, lesson_index, total_lessons } = data;
-  const contentBlocks = lesson.content ? lesson.content.split(/\n---\n/).filter(b => b.trim()) : [];
+  if (!lesson) return <div className="p-20 text-center">Lesson data is corrupt.</div>;
+  
+  // Handle content from either 'content' or 'content_html' (admin editor often uses content_html)
+  const rawContent = lesson.content || lesson.content_html || "";
+  const contentBlocks = rawContent.split(/\n---\n/).filter(b => b.trim());
   const isStudent = user?.role === "student";
   const canResubmit = !submission || submission.status === "rework" || isEditing;
 
@@ -198,45 +280,11 @@ export default function LessonView() {
   const renderContent = (content) => {
     if (!content) return <p className="italic text-slate-500">No content for this lesson yet.</p>;
 
-    return content.split("\n\n").map((block, i) => {
-      const trimmedBlock = block.trim();
-      if (!trimmedBlock) return null;
-
-      // Code block
-      if (trimmedBlock.startsWith("```")) {
-        const code = trimmedBlock.replace(/```/g, "").trim();
-        return (
-          <pre key={i} className="bg-[#0A0A0A] text-[#10B981] p-4 rounded-sm font-mono text-sm overflow-x-auto my-6 border border-white/10">
-            {code}
-          </pre>
-        );
-      }
-
-      // Headings
-      if (trimmedBlock.startsWith("# ")) return <h2 key={i} className="text-2xl font-bold mt-8 mb-4 text-[#0A0A0A]">{trimmedBlock.slice(2)}</h2>;
-      if (trimmedBlock.startsWith("## ")) return <h3 key={i} className="text-xl font-semibold mt-6 mb-3 text-[#0A0A0A]">{trimmedBlock.slice(3)}</h3>;
-      if (trimmedBlock.startsWith("### ")) return <h4 key={i} className="text-lg font-semibold mt-5 mb-2 text-[#0A0A0A]">{trimmedBlock.slice(4)}</h4>;
-
-      // Lists
-      const lines = trimmedBlock.split("\n");
-      if (lines.every(line => line.trim().startsWith("- ") || line.trim().startsWith("* "))) {
-        return (
-          <ul key={i} className="list-disc ml-6 my-4 space-y-2">
-            {lines.map((line, li) => <li key={li} className="text-slate-700">{line.trim().slice(2)}</li>)}
-          </ul>
-        );
-      }
-      if (lines.every(line => /^\d+\.\s/.test(line.trim()))) {
-        return (
-          <ol key={i} className="list-decimal ml-6 my-4 space-y-2">
-            {lines.map((line, li) => <li key={li} className="text-slate-700">{line.trim().replace(/^\d+\.\s/, "")}</li>)}
-          </ol>
-        );
-      }
-
-      // Default paragraph
-      return <p key={i} className="leading-relaxed mb-4 text-slate-700">{trimmedBlock}</p>;
-    });
+    return (
+      <div className="markdown-content">
+        <ReactMarkdown>{content}</ReactMarkdown>
+      </div>
+    );
   };
 
   return (
@@ -245,7 +293,7 @@ export default function LessonView() {
 
       <main className="max-w-6xl mx-auto py-8 px-6 min-h-[calc(100vh-120px)] flex flex-col">
         <div className="mb-6">
-          <Sheet>
+          <Sheet open={isSyllabusOpen} onOpenChange={setIsSyllabusOpen}>
             <SheetTrigger asChild>
               <button className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-sm text-slate-600 hover:text-[#194BFB] hover:border-[#194BFB] transition-all whitespace-nowrap group text-[11px] font-bold uppercase tracking-wider">
                 <BookOpen className="h-3.5 w-3.5 text-[#194BFB]" />
@@ -280,6 +328,7 @@ export default function LessonView() {
                             <Link
                               key={l.id}
                               to={isLocked ? '#' : `/lesson/${l.id}`}
+                              onClick={() => !isLocked && setIsSyllabusOpen(false)}
                               className={`flex items-center justify-between p-3 rounded-sm border transition-all ${isCurrent ? 'bg-[#194BFB]/5 border-[#194BFB] ring-1 ring-[#194BFB]/10' : (isLocked ? 'bg-slate-50 border-slate-100 opacity-60 cursor-not-allowed' : 'bg-white border-slate-200 hover:border-[#194BFB] hover:shadow-sm')}`}
                             >
                               <div className="flex items-center gap-3 min-w-0">
@@ -300,6 +349,16 @@ export default function LessonView() {
             </SheetContent>
           </Sheet>
         </div>
+
+        {classId && user?.role === "mentor" && (
+          <div className="mb-6">
+            <Button asChild variant="outline" className="border-[#194BFB] text-[#194BFB] hover:bg-[#194BFB] hover:text-white rounded-sm font-bold uppercase tracking-widest text-[10px] h-9">
+              <Link to={`/mentor/teach/${classId}`}>
+                <ArrowLeft className="mr-2 h-3.5 w-3.5" /> Back to Teaching Mode
+              </Link>
+            </Button>
+          </div>
+        )}
 
         <Breadcrumbs
           items={[
@@ -352,9 +411,25 @@ export default function LessonView() {
             </Dialog>
           )}
         </div>
-        <h1 className="text-3xl font-extrabold tracking-tight text-[#0A0A0A] font-['Outfit'] mb-8">
+        <h1 className="text-3xl font-extrabold tracking-tight text-[#0A0A0A] font-['Outfit'] mb-4">
           {lesson.title}
         </h1>
+
+        {/* Completion Banner */}
+        {isStudent && isCompleted && (
+          <div className="bg-green-50 border border-green-200 rounded-sm p-3 mb-6 flex items-center gap-2">
+            <CheckCircle className="text-green-500 h-4 w-4 shrink-0" />
+            <span className="text-sm text-green-700">
+              You completed this lesson{completedAt ? ` on ${new Date(completedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}` : ""}
+            </span>
+            <button
+              onClick={handleUndoComplete}
+              className="ml-auto text-xs text-slate-400 hover:text-red-400 transition-colors"
+            >
+              Undo completion
+            </button>
+          </div>
+        )}
 
         {mode === 'content' ? (
           <div className="prose prose-slate prose-lg max-w-4xl mx-auto pb-48">
@@ -503,6 +578,11 @@ export default function LessonView() {
                 <span className="hidden sm:inline">Back to Content</span>
               </Link>
             </Button>
+          ) : currentPage > 0 ? (
+            <Button onClick={() => setCurrentPage(prev => prev - 1)} variant="outline" className="rounded-sm border-slate-200 hover:border-[#194BFB] hover:text-[#194BFB] group transition-all h-10 px-6 font-bold uppercase tracking-wider">
+              <ChevronLeft className="h-4 w-4 mr-1 group-hover:-translate-x-1 transition-transform" />
+              Previous
+            </Button>
           ) : prev_lesson ? (
             <Button asChild variant="outline" className="rounded-sm border-slate-200 hover:border-[#194BFB] hover:text-[#194BFB] group transition-all h-10">
               <Link to={`/lesson/${prev_lesson.id}`}>
@@ -535,7 +615,7 @@ export default function LessonView() {
               </Button>
             ) : (task && task.id) ? (
               <Button asChild className="bg-[#194BFB] hover:bg-[#0F3AE5] text-white rounded-sm group h-10 px-6 font-bold uppercase tracking-wider shadow-lg shadow-blue-100">
-                <Link to={`/lesson/${id}?mode=task`}>
+                <Link to={`/lesson/${id}?mode=task${classId ? `&classId=${classId}` : ''}`}>
                   Go to Task
                   <ClipboardCheck className="h-4 w-4 ml-1 group-hover:translate-x-1 transition-transform" />
                 </Link>
@@ -551,15 +631,15 @@ export default function LessonView() {
                 <Tooltip delayDuration={0}>
                   <TooltipTrigger asChild>
                     <div className="inline-block">
-                      <Button asChild className={`rounded-sm h-10 px-6 font-bold uppercase tracking-wider ${submission?.status === 'approved' ? 'bg-[#194BFB] hover:bg-[#0F3AE5] text-white shadow-lg shadow-blue-100' : 'bg-slate-100 text-slate-400 cursor-not-allowed border-slate-200 pointer-events-none'}`}>
-                        <Link to={submission?.status === 'approved' ? `/lesson/${next_lesson.id}` : '#'}>
+                      <Button asChild className={`rounded-sm h-10 px-6 font-bold uppercase tracking-wider ${(submission?.status === 'approved' || user?.role === 'mentor') ? 'bg-[#194BFB] hover:bg-[#0F3AE5] text-white shadow-lg shadow-blue-100' : 'bg-slate-100 text-slate-400 cursor-not-allowed border-slate-200 pointer-events-none'}`}>
+                        <Link to={(submission?.status === 'approved' || user?.role === 'mentor') ? `/lesson/${next_lesson.id}${classId ? `?classId=${classId}` : ''}` : '#'}>
                           Next Lesson
                           <ChevronRight className="h-4 w-4 ml-1" />
                         </Link>
                       </Button>
                     </div>
                   </TooltipTrigger>
-                  {submission?.status !== 'approved' && (
+                  {(submission?.status !== 'approved' && user?.role !== 'mentor') && (
                     <TooltipContent side="top" className="bg-slate-900 text-white border-none text-[10px] font-bold uppercase tracking-widest px-3 py-2">
                       Complete & Get Approval first
                     </TooltipContent>

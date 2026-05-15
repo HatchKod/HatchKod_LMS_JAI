@@ -9,17 +9,31 @@ import { useAuth } from "../lib/auth";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "../components/ui/tooltip";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "../components/ui/accordion";
 import { toast } from "sonner";
+import { supabase } from "../lib/supabase";
 
 export default function CourseView() {
   const { id } = useParams();
   const { user } = useAuth();
   const [course, setCourse] = useState(null);
 
+  const load = async () => {
+    const { data } = await api.get(`/courses/${id}`);
+    setCourse(data);
+  };
+
   useEffect(() => {
-    (async () => {
-      const { data } = await api.get(`/courses/${id}`);
-      setCourse(data);
-    })();
+    load();
+
+    // Real-time sync for course view
+    const channel = supabase.channel(`course_view_${id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'courses', filter: `id=eq.${id}` }, load)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'modules', filter: `course_id=eq.${id}` }, load)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'lessons' }, load) // Simplified for lessons
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [id]);
 
   useEffect(() => {
@@ -99,11 +113,10 @@ function LessonRow({ lesson, li, locked }) {
           {li + 1}
         </span>
         <div className="min-w-0">
-          <div className="font-medium truncate">{lesson.title}</div>
-          <div className="text-xs text-slate-500 truncate">
-            {lesson.task ? "Has task" : "No task"}
+          <div className="font-semibold truncate text-slate-900">{lesson.title}</div>
+          <div className="text-[10px] text-slate-500 truncate uppercase tracking-wide">
+            {lesson.task ? "Coding Task" : "Reading Only"}
           </div>
-          <div className="font-bold text-slate-900 truncate pr-4">{lesson.title}</div>
         </div>
       </div>
       <div className="flex items-center gap-3 shrink-0">

@@ -2,14 +2,18 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import { api } from "../lib/api";
+import { useAuth } from "../lib/auth";
 import { Card } from "../components/ui/card";
 import { Progress } from "../components/ui/progress";
 import { Button } from "../components/ui/button";
-import { ArrowRight, BookOpen, ListChecks, Flame, Clock, Award, Target, Trophy } from "lucide-react";
+import TodaysClasses from "../components/student/TodaysClasses";
+import MyAttendance from "../components/student/MyAttendance";
 import { Avatar, AvatarFallback } from "../components/ui/avatar";
 import StatusPill from "../components/StatusPill";
+import { Users, Award, Target, Flame, Trophy, Video, BookOpen, ListChecks, Clock, ArrowRight, TrendingUp } from "lucide-react";
 
 export default function StudentDashboard() {
+  const { user } = useAuth();
   const [data, setData] = useState(null);
   const [activeTab, setActiveTab] = useState("inprogress");
 
@@ -73,6 +77,23 @@ export default function StudentDashboard() {
             link="/leaderboard"
             linkText="View Board"
           />
+          <Stat
+            label="My Progress"
+            value="View →"
+            Icon={TrendingUp}
+            link="/student/progress"
+            linkText="Open Progress"
+          />
+        </div>
+        
+        <div className="mb-12">
+          <div className="text-[10px] uppercase tracking-[0.22em] text-slate-400 font-bold mb-4">LIVE SESSIONS</div>
+          <TodaysClasses />
+        </div>
+
+        <div className="mb-12">
+          <div className="text-[10px] uppercase tracking-[0.22em] text-slate-400 font-bold mb-4">MY ATTENDANCE</div>
+          <MyAttendance />
         </div>
 
         {data.next_lesson && activeTab === "inprogress" && (() => {

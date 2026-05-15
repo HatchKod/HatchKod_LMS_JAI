@@ -33,6 +33,7 @@ import {
   Trophy
 } from "lucide-react";
 import { toast } from "sonner";
+import NotificationBell from "./NotificationBell";
 
 export default function Navbar() {
   const { user, logout } = useAuth();
@@ -84,10 +85,12 @@ export default function Navbar() {
   return (
     <header className="sticky top-0 z-40 w-full border-b border-border bg-white" data-testid="navbar">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">
-        <div className="flex items-center gap-8">
-          <Link to={user ? dashHref : "/"} className="flex items-center gap-2" data-testid="brand-link">
-            <img src="/logo.png" alt="HatchKod" className="h-10 w-auto object-contain" />
-            <span className="font-[Outfit] text-lg font-bold tracking-tight">HatchKod</span>
+        <div className="flex items-center gap-10">
+          <Link to={user ? dashHref : "/"} className="flex items-center gap-3 group transition-transform active:scale-95" data-testid="brand-link">
+            <div className="relative h-10 w-10 flex items-center justify-center bg-slate-50 border border-slate-100 rounded-lg overflow-hidden">
+              <img src="/logo.png" alt="HatchKod" className="h-7 w-7 object-contain" />
+            </div>
+            <span className="font-['Outfit'] text-xl font-black tracking-tight text-[#0A0A0A] group-hover:text-[#194BFB] transition-colors">HatchKod</span>
           </Link>
 
           {user && (
@@ -144,6 +147,7 @@ export default function Navbar() {
         </div>
 
         <div className="flex items-center gap-4">
+          {user && <NotificationBell />}
           {user ? (
             <DropdownMenu>
               {/* ... user dropdown content ... */}
