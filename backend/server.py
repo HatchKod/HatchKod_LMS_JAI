@@ -1299,7 +1299,25 @@ async def admin_create_user(payload: AdminUserIn, _: dict = Depends(require_role
 # -------------------- Dashboards --------------------
 @api.get("/dashboard/student")
 async def student_dashboard(user: dict = Depends(require_roles("student"))):
-    courses = supabase.table("courses").select("*").eq("is_published", True).execute().data
+    # --- BATCH FILTER: Only show the course(s) from the student's assigned batch(es) ---
+    student_batches = supabase.table("batch_students")\
+        .select("batch_id, batches(course_id)")\
+        .eq("student_id", user["id"])\
+        .execute().data
+
+    batch_course_ids = []
+    for sb in (student_batches or []):
+        batch_info = sb.get("batches") or {}
+        cid = batch_info.get("course_id")
+        if cid and cid not in batch_course_ids:
+            batch_course_ids.append(cid)
+
+    if batch_course_ids:
+        courses = supabase.table("courses").select("*").eq("is_published", True).in_("id", batch_course_ids).execute().data
+    else:
+        # Student is not enrolled in any batch yet — show nothing
+        courses = []
+
     result_courses = []
     next_lesson = None
 
@@ -2089,14 +2107,13 @@ async def get_weekly_leaderboard(user: dict = Depends(get_current_user)):
         today = now_utc().date()
         week_start = (today - timedelta(days=today.weekday())).isoformat()
         
-        # Fetch all students with XP from the users table for a full leaderboard
-        # (This ensures all 5-6 students show up even if they haven't synced their weekly record yet)
+        # Fetch ALL active students ordered by XP — 0 XP students are included
         all_students = supabase.table("users")\
             .select("id, name, total_xp, role")\
             .eq("role", "student")\
-            .gt("total_xp", 0)\
+            .eq("is_active", True)\
             .order("total_xp", desc=True)\
-            .limit(20)\
+            .limit(50)\
             .execute().data
         
         # Format results
@@ -2108,19 +2125,20 @@ async def get_weekly_leaderboard(user: dict = Depends(get_current_user)):
             leaderboard.append({
                 "rank": i + 1,
                 "name": student["name"] or "Unknown Student",
-                "xp": student["total_xp"],
+                "xp": student["total_xp"] or 0,
                 "is_me": is_me
             })
             if is_me:
                 user_rank = i + 1
         
-        # If current user is not in top 20, find their specific rank
+        # If current user is not in list, find their specific rank
         if user_rank == "N/A" and user["role"] == "student":
-            all_ranking = supabase.table("users").select("id").eq("role", "student").order("total_xp", desc=True).execute().data
+            all_ranking = supabase.table("users").select("id").eq("role", "student").eq("is_active", True).order("total_xp", desc=True).execute().data
             for i, s in enumerate(all_ranking):
                 if s["id"] == user["id"]:
                     user_rank = i + 1
                     break
+
         
         return {
             "week_start": week_start,
@@ -3228,10 +3246,27 @@ async def on_shutdown():
 # -------------------- Courses (Student/Public) --------------------
 @api.get("/courses")
 async def get_courses(user: dict = Depends(get_current_user)):
-    q = supabase.table("courses").select("*, users(name)").order("created_at", desc=True)
     if user["role"] == "student":
-        q = q.eq("is_published", True)
-    
+        # --- BATCH FILTER: Only show the course(s) from the student's assigned batch(es) ---
+        student_batches = supabase.table("batch_students")\
+            .select("batch_id, batches(course_id)")\
+            .eq("student_id", user["id"])\
+            .execute().data
+
+        batch_course_ids = []
+        for sb in (student_batches or []):
+            batch_info = sb.get("batches") or {}
+            cid = batch_info.get("course_id")
+            if cid and cid not in batch_course_ids:
+                batch_course_ids.append(cid)
+
+        if not batch_course_ids:
+            return []  # Not in any batch yet
+
+        q = supabase.table("courses").select("*, users(name)").eq("is_published", True).in_("id", batch_course_ids).order("created_at", desc=True)
+    else:
+        q = supabase.table("courses").select("*, users(name)").order("created_at", desc=True)
+
     res = q.execute()
     courses = res.data if res else []
     for c in courses:

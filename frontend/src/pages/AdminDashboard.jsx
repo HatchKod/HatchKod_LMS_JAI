@@ -873,7 +873,7 @@ function ManageStudentsPanel({ batch, onClose }) {
                     <div className="text-[10px] text-slate-500">{s.email}</div>
                   </div>
                 </div>
-                <button onClick={() => removeStudent(s.id)} className="p-1.5 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all">
+                <button onClick={() => removeStudent(s.student_id)} className="p-1.5 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all">
                   <X className="h-3.5 w-3.5" />
                 </button>
               </div>
