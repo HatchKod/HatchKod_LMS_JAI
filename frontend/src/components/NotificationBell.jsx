@@ -15,20 +15,27 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-export default function NotificationBell() {
+export default function NotificationBell({ initialUnreadCount }) {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [notifications, setNotifications] = useState([]);
-  const [unreadCount, setUnreadCount] = useState(0);
+  const [unreadCount, setUnreadCount] = useState(initialUnreadCount ?? 0);
   const [isOpen, setIsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const dropdownRef = useRef(null);
 
   useEffect(() => {
+    if (initialUnreadCount !== undefined) {
+      setUnreadCount(initialUnreadCount);
+    }
+  }, [initialUnreadCount]);
+
+  useEffect(() => {
     if (!user) return;
 
-    // Initial Unread Count
+    // Initial Unread Count (skip if provided via props)
     const fetchUnreadCount = async () => {
+      if (initialUnreadCount !== undefined) return;
       try {
         const { data } = await api.get("/notifications/unread-count");
         setUnreadCount(data.count);

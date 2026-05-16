@@ -35,7 +35,7 @@ import {
 import { toast } from "sonner";
 import NotificationBell from "./NotificationBell";
 
-export default function Navbar() {
+export default function Navbar({ unreadCount }) {
   const { user, logout } = useAuth();
   const nav = useNavigate();
   const location = useLocation();
@@ -115,7 +115,7 @@ export default function Navbar() {
                     : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
                 }`}
               >
-                <Code2 className="h-4 w-4" />
+                <HelpCircle className="h-4 w-4" />
                 Codepad
               </Link>
               <Link
@@ -147,7 +147,7 @@ export default function Navbar() {
         </div>
 
         <div className="flex items-center gap-4">
-          {user && <NotificationBell />}
+          {user && <NotificationBell initialUnreadCount={unreadCount} />}
           {user ? (
             <DropdownMenu>
               {/* ... user dropdown content ... */}

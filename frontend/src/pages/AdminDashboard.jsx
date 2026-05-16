@@ -38,7 +38,8 @@ import {
   Pencil,
   X,
   Eye,
-  EyeOff
+  EyeOff,
+  Loader2
 } from "lucide-react";
 import { toast } from "sonner";
 import AdminAttendance from "../components/admin/AdminAttendance";
@@ -50,30 +51,57 @@ export default function AdminDashboard() {
   const [mentors, setMentors] = useState([]);
   const [inactiveUsers, setInactiveUsers] = useState([]);
   const [batches, setBatches] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [pageLoading, setPageLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("courses");
   const [selectedBatch, setSelectedBatch] = useState(null);
 
   const refresh = async () => {
-    const [s, c, st, mt, inact, b] = await Promise.all([
-      api.get("/dashboard/admin"),
-      api.get("/admin/courses"),
-      api.get("/users", { params: { role: "student" } }),
-      api.get("/users", { params: { role: "mentor" } }),
-      api.get("/users/inactive"),
-      api.get("/admin/batches")
+    // Helper to log errors but return a safe default
+    const safeGet = async (url, defaultValue = [], params = {}) => {
+      try {
+        const res = await api.get(url, params);
+        return res.data;
+      } catch (e) {
+        console.error(`Failed to fetch ${url}:`, e);
+        return defaultValue;
+      }
+    };
+
+    const [s, c, st, mt, inact, b, uc] = await Promise.all([
+      safeGet("/dashboard/admin", null),
+      safeGet("/admin/courses", []),
+      safeGet("/users", [], { params: { role: "student" } }),
+      safeGet("/users", [], { params: { role: "mentor" } }),
+      safeGet("/users/inactive", []),
+      safeGet("/admin/batches", []),
+      safeGet("/notifications/unread-count", { count: 0 })
     ]);
-    setStats(s.data); 
-    setCourses(c.data); 
-    setStudents(st.data); 
-    setMentors(mt.data);
-    setInactiveUsers(inact.data);
-    setBatches(b.data);
+
+    setStats(s);
+    setCourses(c);
+    setStudents(st);
+    setMentors(mt);
+    setInactiveUsers(inact);
+    setBatches(b);
+    setUnreadCount(uc?.count || 0);
+    setPageLoading(false);
   };
+  
   useEffect(() => { refresh(); }, []);
+
+  if (pageLoading) {
+    return (
+      <div className="min-h-screen bg-[#F8FAFC] flex flex-col items-center justify-center">
+        <Loader2 className="h-10 w-10 text-[#194BFB] animate-spin mb-4" />
+        <p className="text-sm font-bold uppercase tracking-widest text-slate-500 font-['Outfit']">Initializing Dashboard...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#F8FAFC]" data-testid="admin-dashboard">
-      <Navbar />
+      <Navbar unreadCount={unreadCount} />
       <div className="mx-auto max-w-7xl px-4 sm:px-6 py-10 fade-in">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-4">
           <div className="flex items-center justify-between border-b border-slate-200 mb-8">
