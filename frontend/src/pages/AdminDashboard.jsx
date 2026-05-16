@@ -267,6 +267,7 @@ function CoursesPanel({ courses, stats, refresh }) {
       const res = await api.post("/admin/courses", newCourse);
       toast.success("Course created");
       setShowNewModal(false);
+      refresh(); // Sync state before navigating
       navigate(`/admin/course/${res.data.id}`);
     } catch (e) {
       toast.error(formatApiError(e.response?.data?.detail));
@@ -727,6 +728,7 @@ function BatchesPanel({ batches, selectedBatch, setSelectedBatch, refresh, cours
           <ManageStudentsPanel 
             batch={selectedBatch} 
             onClose={() => setSelectedBatch(null)} 
+            refresh={refresh}
           />
         ) : (
           <Card className="p-12 flex flex-col items-center justify-center text-slate-400 border-dashed border-2 bg-slate-50/30">
@@ -803,7 +805,7 @@ function BatchCard({ batch, isSelected, onSelect, refresh, courses, mentors }) {
   );
 }
 
-function ManageStudentsPanel({ batch, onClose }) {
+function ManageStudentsPanel({ batch, onClose, refresh }) {
   const [enrolled, setEnrolled] = useState([]);
   const [allStudents, setAllStudents] = useState([]);
   const [selectedStudentId, setSelectedStudentId] = useState("");
@@ -831,7 +833,8 @@ function ManageStudentsPanel({ batch, onClose }) {
       await api.post(`/admin/batches/${batch.id}/students`, { student_id: selectedStudentId });
       toast.success("Student added to batch");
       setSelectedStudentId("");
-      loadData();
+      await loadData();
+      refresh(); // Refresh dashboard stats/batch list
     } catch (e) {
       toast.error(e.response?.data?.detail || "Failed to add student");
     } finally { setBusy(false); }
@@ -841,7 +844,8 @@ function ManageStudentsPanel({ batch, onClose }) {
     try {
       await api.delete(`/admin/batches/${batch.id}/students/${sid}`);
       toast.success("Student removed");
-      loadData();
+      await loadData();
+      refresh(); // Refresh dashboard stats/batch list
     } catch (e) {
       toast.error("Failed to remove student");
     }
