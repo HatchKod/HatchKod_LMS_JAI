@@ -7,19 +7,19 @@ import { Card } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
-import { 
-  Video, 
-  Users, 
-  BookOpen, 
-  ChevronDown, 
-  ChevronRight, 
-  ExternalLink, 
-  StopCircle, 
-  Bell, 
-  Github, 
-  PlayCircle, 
-  ClipboardList, 
-  CheckCircle2, 
+import {
+  Video,
+  Users,
+  BookOpen,
+  ChevronDown,
+  ChevronRight,
+  ExternalLink,
+  StopCircle,
+  Bell,
+  Github,
+  PlayCircle,
+  ClipboardList,
+  CheckCircle2,
   Loader2,
   Clock,
   ArrowRight,
@@ -37,7 +37,7 @@ export default function TeachingMode() {
   const { classId } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
-  
+
   // Data State
   const [session, setSession] = useState(null);
   const [course, setCourse] = useState(null);
@@ -47,7 +47,7 @@ export default function TeachingMode() {
   const [loading, setLoading] = useState(true);
   const [isSyllabusOpen, setIsSyllabusOpen] = useState(false);
   const [isRosterOpen, setIsRosterOpen] = useState(false);
-  
+
   // UI State
   const [activeTab, setActiveTab] = useState("learn"); // learn, video, task
   const [isEndModalOpen, setIsEndModalOpen] = useState(false);
@@ -94,10 +94,10 @@ export default function TeachingMode() {
         api.get(`/courses/${sess.course_id}`),
         api.get(`/batches/${sess.batch_id}/students`)
       ]);
-      
+
       setCourse(resCourse.data);
       setAllBatchStudents(resStudents.data);
-      
+
       // Auto-select subtopic: Priority 1: Current Live Subtopic (from topic_id in session status), Priority 2: First subtopic of course
       let initialSubtopicId = null;
       if (sess.topic_id && resCourse.data.modules) {
@@ -111,7 +111,7 @@ export default function TeachingMode() {
         initialSubtopicId = resCourse.data.modules?.[0]?.topics?.[0]?.subtopics?.[0]?.id;
       }
       setActiveSubtopicId(initialSubtopicId);
-      
+
       // Expand modules by default
       if (resCourse.data.modules) {
         setExpandedModules(new Set(resCourse.data.modules.map(m => m.id)));
@@ -141,14 +141,14 @@ export default function TeachingMode() {
 
   useEffect(() => {
     loadInitialData();
-    
+
     // Realtime subscription
     const channel = supabase.channel(`teaching-mode-${classId}`)
-      .on('postgres_changes', { 
-        event: 'UPDATE', 
-        schema: 'public', 
-        table: 'class_sessions', 
-        filter: `id=eq.${classId}` 
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'class_sessions',
+        filter: `id=eq.${classId}`
       }, (payload) => {
         if (payload.new.status === 'ended') {
           toast.info("Class has been ended.");
@@ -176,11 +176,11 @@ export default function TeachingMode() {
       const start = new Date(session.started_at);
       const now = new Date();
       const diff = Math.floor((now - start) / 1000);
-      
+
       const hrs = Math.floor(diff / 3600).toString().padStart(2, '0');
       const mins = Math.floor((diff % 3600) / 60).toString().padStart(2, '0');
       const secs = (diff % 60).toString().padStart(2, '0');
-      
+
       setTimer(`${hrs}:${mins}:${secs}`);
     };
 
@@ -340,7 +340,7 @@ export default function TeachingMode() {
                 Class Roster
               </h3>
             </div>
-            
+
             <div className="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar h-[calc(100vh-140px)]">
               {/* Joined Students */}
               <div>
@@ -386,9 +386,9 @@ export default function TeachingMode() {
                         <p className="text-[11px] font-bold text-slate-500 truncate group-hover:text-slate-700 transition-colors">{s.name}</p>
                         <p className="text-[9px] text-slate-400 font-bold uppercase tracking-tighter">Not Joined</p>
                       </div>
-                      <Button 
-                        variant="ghost" 
-                        size="sm" 
+                      <Button
+                        variant="ghost"
+                        size="sm"
                         className="h-7 w-7 p-0 hover:bg-amber-50 hover:text-amber-600 rounded-full"
                         onClick={() => sendReminder(s.student_id)}
                         disabled={remindingId === s.student_id}
@@ -402,8 +402,8 @@ export default function TeachingMode() {
             </div>
 
             <div className="p-4 bg-white border-t border-slate-200 sticky bottom-0">
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 className="w-full h-9 rounded-sm border-slate-200 text-[10px] font-bold uppercase tracking-widest hover:text-[#194BFB] hover:border-[#194BFB]"
                 onClick={() => {
                   pendingStudents.forEach(s => sendReminder(s.student_id));
@@ -449,8 +449,8 @@ export default function TeachingMode() {
                           {m.topics?.map((t, ti) => (
                             <div key={t.id} className="space-y-2">
                               <div className="flex items-center gap-2 px-3 py-1">
-                                 <div className="h-1.5 w-1.5 rounded-full bg-slate-300" />
-                                 <span className="text-xs font-bold text-slate-500 uppercase tracking-tight">Topic: {t.title}</span>
+                                <div className="h-1.5 w-1.5 rounded-full bg-slate-300" />
+                                <span className="text-xs font-bold text-slate-500 uppercase tracking-tight">Topic: {t.title}</span>
                               </div>
                               <div className="space-y-1 ml-3">
                                 {t.subtopics?.map((s) => {
@@ -486,154 +486,154 @@ export default function TeachingMode() {
             </Sheet>
           </div>
 
-            <Breadcrumbs
-              items={[
-                { label: course?.title, to: `/course/${course?.id}` },
-                { label: activeSubtopic?.title }
-              ]}
-            />
+          <Breadcrumbs
+            items={[
+              { label: course?.title, to: `/course/${course?.id}` },
+              { label: activeSubtopic?.title }
+            ]}
+          />
 
-            <div className="max-w-3xl mx-auto w-full mt-4">
-              <div className="flex items-center justify-between mb-6">
-                <div className="flex items-center gap-3">
-                  <div className="bg-blue-50 text-[#194BFB] px-3 py-1 rounded-sm text-[10px] font-bold uppercase tracking-wider flex items-center gap-2 border border-blue-100">
-                    <BookOpen className="h-3 w-3" />
-                    Subtopic
-                  </div>
-                  {activeSubtopicId === session.topic_id && (
-                    <div className="bg-emerald-100 text-emerald-700 px-3 py-1 rounded-sm text-[10px] font-bold uppercase tracking-wider border border-emerald-200">
-                      Live Topic
-                    </div>
-                  )}
+          <div className="max-w-3xl mx-auto w-full mt-4">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <div className="bg-blue-50 text-[#194BFB] px-3 py-1 rounded-sm text-[10px] font-bold uppercase tracking-wider flex items-center gap-2 border border-blue-100">
+                  <BookOpen className="h-3 w-3" />
+                  Subtopic
                 </div>
-
-                {activeSubtopic?.video_url && (
-                  <Dialog>
-                    <DialogTrigger asChild>
-                      <Button size="sm" className="bg-[#194BFB] hover:bg-[#0F3AE5] text-white rounded-sm h-8 px-3 font-bold text-[10px] uppercase tracking-widest gap-2 shrink-0 shadow-lg shadow-blue-100">
-                        <Video className="h-3.5 w-3.5" />
-                        Recordings
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent className="max-w-4xl p-0 overflow-hidden bg-black border-none rounded-sm">
-                      <div className="p-4 bg-white border-b border-border text-left">
-                        <h3 className="text-sm font-bold flex items-center gap-2 uppercase tracking-wider">
-                          <Video className="h-4 w-4 text-[#194BFB]" />
-                          Session Recording — {activeSubtopic.title}
-                        </h3>
-                      </div>
-                      <div className="aspect-video w-full">
-                        <iframe
-                          src={formatVideoUrl(activeSubtopic.video_url)}
-                          title={activeSubtopic.title}
-                          className="w-full h-full"
-                          allow="autoplay; encrypted-media; picture-in-picture"
-                          allowFullScreen
-                        />
-                      </div>
-                    </DialogContent>
-                  </Dialog>
+                {activeSubtopicId === session.topic_id && (
+                  <div className="bg-emerald-100 text-emerald-700 px-3 py-1 rounded-sm text-[10px] font-bold uppercase tracking-wider border border-emerald-200">
+                    Live Topic
+                  </div>
                 )}
               </div>
 
-              {/* TABS - Matching student view */}
-              {activeSubtopic?.task && (
-                <div className="flex border-b border-slate-200 mb-6 gap-6">
-                  <button
-                    onClick={() => setActiveTab('learn')}
-                    className={`pb-2.5 text-[10px] font-bold uppercase tracking-widest transition-all relative ${activeTab === 'learn' ? 'text-[#194BFB]' : 'text-slate-400 hover:text-slate-600'}`}
-                  >
-                    Subtopic
-                    {activeTab === 'learn' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#194BFB]" />}
-                  </button>
-                  <button
-                    onClick={() => setActiveTab('task')}
-                    className={`pb-2.5 text-[10px] font-bold uppercase tracking-widest transition-all relative ${activeTab === 'task' ? 'text-[#194BFB]' : 'text-slate-400 hover:text-slate-600'}`}
-                  >
-                    Assignment
-                    {activeTab === 'task' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#194BFB]" />}
-                  </button>
-                </div>
-              )}
-
-              <h1 className="text-2xl font-extrabold tracking-tight text-[#0A0A0A] font-['Outfit'] mb-4">
-                {activeTab === 'learn' ? activeSubtopic?.title : (activeSubtopic?.task?.title || "Assignment")}
-              </h1>
-
-              {/* CONTENT AREA - Multi-page matching student view */}
-              <div className="animate-in fade-in slide-in-from-bottom-2 duration-300 space-y-8 pb-48">                {activeTab === 'task' && activeSubtopic?.task ? (
-                  /* Task Mode - Exactly as student task view */
-                  <div className="space-y-8">
-                    <div className="bg-white border border-slate-200 rounded-sm shadow-sm overflow-hidden">
-                      <div className="bg-slate-50 border-b border-slate-200 p-6">
-                        <div className="flex items-center gap-3 text-[#194BFB] mb-2">
-                          <div className="h-8 w-8 bg-blue-50 rounded-full flex items-center justify-center border border-blue-100 shadow-sm">
-                            <ClipboardList className="h-4 w-4" />
-                          </div>
-                          <div>
-                            <span className="text-[9px] font-black uppercase tracking-[0.2em] opacity-60">Live Assignment</span>
-                            <h4 className="text-lg font-bold text-slate-900 tracking-tight">{activeSubtopic?.task?.title || "Project Task"}</h4>
-                          </div>
-                        </div>
-                        <p className="text-xs font-bold text-slate-500 leading-relaxed max-w-2xl">
-                          {activeSubtopic?.task?.description}
-                        </p>
-                      </div>
-                      
-                      <div className="p-6 space-y-6 bg-white">
-                        <div>
-                          <h5 className="text-[10px] uppercase font-black text-slate-400 tracking-[0.2em] mb-3 flex items-center gap-2">
-                            <div className="h-1 w-1 rounded-full bg-slate-300" /> Implementation Instructions
-                          </h5>
-                          <div className="prose prose-slate max-w-none text-xs text-slate-700 leading-relaxed markdown-content pl-3 border-l-2 border-slate-50">
-                            <ReactMarkdown>{activeSubtopic?.task?.instructions}</ReactMarkdown>
-                          </div>
-                        </div>
-
-                        {activeSubtopic?.task?.expected_output && (
-                          <div>
-                            <h5 className="text-[10px] uppercase font-black text-slate-400 tracking-[0.2em] mb-3 flex items-center gap-2">
-                              <div className="h-1 w-1 rounded-full bg-slate-300" /> Expected Result
-                            </h5>
-                            <div className="relative group">
-                              <pre className="bg-slate-900 text-[#10B981] p-6 rounded-sm font-['JetBrains_Mono'] text-[11px] overflow-x-auto border-l-4 border-[#10B981] shadow-2xl">
-                                {activeSubtopic?.task?.expected_output}
-                              </pre>
-                              <div className="absolute top-4 right-4 bg-[#10B981]/10 text-[#10B981] text-[8px] font-bold px-2 py-1 rounded-sm uppercase tracking-widest border border-[#10B981]/20">Output</div>
-                            </div>
-                          </div>
-                        )}
-                      </div>
+              {activeSubtopic?.video_url && (
+                <Dialog>
+                  <DialogTrigger asChild>
+                    <Button size="sm" className="bg-[#194BFB] hover:bg-[#0F3AE5] text-white rounded-sm h-8 px-3 font-bold text-[10px] uppercase tracking-widest gap-2 shrink-0 shadow-lg shadow-blue-100">
+                      <Video className="h-3.5 w-3.5" />
+                      Recordings
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="max-w-4xl p-0 overflow-hidden bg-black border-none rounded-sm">
+                    <div className="p-4 bg-white border-b border-border text-left">
+                      <h3 className="text-sm font-bold flex items-center gap-2 uppercase tracking-wider">
+                        <Video className="h-4 w-4 text-[#194BFB]" />
+                        Session Recording — {activeSubtopic.title}
+                      </h3>
                     </div>
+                    <div className="aspect-video w-full">
+                      <iframe
+                        src={formatVideoUrl(activeSubtopic.video_url)}
+                        title={activeSubtopic.title}
+                        className="w-full h-full"
+                        allow="autoplay; encrypted-media; picture-in-picture"
+                        allowFullScreen
+                      />
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              )}
+            </div>
 
-                    {/* Extra Mentor Context for Task */}
-                    <div className="bg-amber-50 border border-amber-100 p-5 rounded-sm flex items-start gap-4">
-                      <div className="h-7 w-7 bg-amber-100 rounded-full flex items-center justify-center shrink-0">
-                        <Users className="h-3.5 w-3.5 text-amber-600" />
+            {/* TABS - Matching student view */}
+            {activeSubtopic?.task && (
+              <div className="flex border-b border-slate-200 mb-6 gap-6">
+                <button
+                  onClick={() => setActiveTab('learn')}
+                  className={`pb-2.5 text-[10px] font-bold uppercase tracking-widest transition-all relative ${activeTab === 'learn' ? 'text-[#194BFB]' : 'text-slate-400 hover:text-slate-600'}`}
+                >
+                  Subtopic
+                  {activeTab === 'learn' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#194BFB]" />}
+                </button>
+                <button
+                  onClick={() => setActiveTab('task')}
+                  className={`pb-2.5 text-[10px] font-bold uppercase tracking-widest transition-all relative ${activeTab === 'task' ? 'text-[#194BFB]' : 'text-slate-400 hover:text-slate-600'}`}
+                >
+                  Assignment
+                  {activeTab === 'task' && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#194BFB]" />}
+                </button>
+              </div>
+            )}
+
+            <h1 className="text-2xl font-extrabold tracking-tight text-[#0A0A0A] font-['Outfit'] mb-4">
+              {activeTab === 'learn' ? activeSubtopic?.title : (activeSubtopic?.task?.title || "Assignment")}
+            </h1>
+
+            {/* CONTENT AREA - Multi-page matching student view */}
+            <div className="animate-in fade-in slide-in-from-bottom-2 duration-300 space-y-8 pb-48">                {activeTab === 'task' && activeSubtopic?.task ? (
+              /* Task Mode - Exactly as student task view */
+              <div className="space-y-8">
+                <div className="bg-white border border-slate-200 rounded-sm shadow-sm overflow-hidden">
+                  <div className="bg-slate-50 border-b border-slate-200 p-6">
+                    <div className="flex items-center gap-3 text-[#194BFB] mb-2">
+                      <div className="h-8 w-8 bg-blue-50 rounded-full flex items-center justify-center border border-blue-100 shadow-sm">
+                        <ClipboardList className="h-4 w-4" />
                       </div>
                       <div>
-                        <h5 className="text-xs font-bold text-amber-900 mb-1">Mentor Guidance</h5>
-                        <p className="text-[10px] text-amber-700 font-medium leading-relaxed">
-                          While students work on this assignment, you can monitor their progress in the "Progress" tab of the dashboard. Ensure all students understand the expected output before they begin.
-                        </p>
+                        <span className="text-[9px] font-black uppercase tracking-[0.2em] opacity-60">Live Assignment</span>
+                        <h4 className="text-lg font-bold text-slate-900 tracking-tight">{activeSubtopic?.task?.title || "Project Task"}</h4>
                       </div>
                     </div>
+                    <p className="text-xs font-bold text-slate-500 leading-relaxed max-w-2xl">
+                      {activeSubtopic?.task?.description}
+                    </p>
                   </div>
-                ) : (
-                  <div className="prose prose-slate max-w-none text-sm leading-relaxed markdown-content">
-                    {(activeSubtopic?.content || activeSubtopic?.content_html) ? (
-                      <ReactMarkdown>
-                        {contentBlocks[currentPage] || ""}
-                      </ReactMarkdown>
-                    ) : (
-                      <div className="py-20 text-center text-slate-300 italic border-2 border-dashed border-slate-50 rounded-sm">
-                        No written content for this subtopic yet.
+
+                  <div className="p-6 space-y-6 bg-white">
+                    <div>
+                      <h5 className="text-[10px] uppercase font-black text-slate-400 tracking-[0.2em] mb-3 flex items-center gap-2">
+                        <div className="h-1 w-1 rounded-full bg-slate-300" /> Implementation Instructions
+                      </h5>
+                      <div className="prose prose-slate max-w-none text-xs text-slate-700 leading-relaxed markdown-content pl-3 border-l-2 border-slate-50">
+                        <ReactMarkdown>{activeSubtopic?.task?.instructions}</ReactMarkdown>
+                      </div>
+                    </div>
+
+                    {activeSubtopic?.task?.expected_output && (
+                      <div>
+                        <h5 className="text-[10px] uppercase font-black text-slate-400 tracking-[0.2em] mb-3 flex items-center gap-2">
+                          <div className="h-1 w-1 rounded-full bg-slate-300" /> Expected Result
+                        </h5>
+                        <div className="relative group">
+                          <pre className="bg-slate-900 text-[#10B981] p-6 rounded-sm font-['JetBrains_Mono'] text-[11px] overflow-x-auto border-l-4 border-[#10B981] shadow-2xl">
+                            {activeSubtopic?.task?.expected_output}
+                          </pre>
+                          <div className="absolute top-4 right-4 bg-[#10B981]/10 text-[#10B981] text-[8px] font-bold px-2 py-1 rounded-sm uppercase tracking-widest border border-[#10B981]/20">Output</div>
+                        </div>
                       </div>
                     )}
                   </div>
-                )})}
+                </div>
+
+                {/* Extra Mentor Context for Task */}
+                <div className="bg-amber-50 border border-amber-100 p-5 rounded-sm flex items-start gap-4">
+                  <div className="h-7 w-7 bg-amber-100 rounded-full flex items-center justify-center shrink-0">
+                    <Users className="h-3.5 w-3.5 text-amber-600" />
+                  </div>
+                  <div>
+                    <h5 className="text-xs font-bold text-amber-900 mb-1">Mentor Guidance</h5>
+                    <p className="text-[10px] text-amber-700 font-medium leading-relaxed">
+                      While students work on this assignment, you can monitor their progress in the "Progress" tab of the dashboard. Ensure all students understand the expected output before they begin.
+                    </p>
+                  </div>
+                </div>
               </div>
+            ) : (
+              <div className="prose prose-slate max-w-none text-sm leading-relaxed markdown-content">
+                {(activeSubtopic?.content || activeSubtopic?.content_html) ? (
+                  <ReactMarkdown>
+                    {contentBlocks[currentPage] || ""}
+                  </ReactMarkdown>
+                ) : (
+                  <div className="py-20 text-center text-slate-300 italic border-2 border-dashed border-slate-50 rounded-sm">
+                    No written content for this subtopic yet.
+                  </div>
+                )}
+              </div>
+            )})
             </div>
+          </div>
         </main>
       </div>
 
@@ -641,8 +641,8 @@ export default function TeachingMode() {
         {activeTab === 'task' ? (
           <>
             <div className="w-1/3 text-left">
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 onClick={() => setActiveTab('learn')}
                 className="rounded-sm border-slate-200 hover:border-[#194BFB] hover:text-[#194BFB] h-10 px-6 text-xs font-bold uppercase tracking-widest"
               >
@@ -655,12 +655,12 @@ export default function TeachingMode() {
               </span>
             </div>
             <div className="w-1/3 text-right">
-              <Button 
+              <Button
                 onClick={() => {
                   const allSubtopics = course?.modules?.flatMap(m => m.topics || []).flatMap(t => t.subtopics || []) || [];
                   const idx = allSubtopics.findIndex(s => s.id === activeSubtopicId);
                   if (idx < allSubtopics.length - 1) {
-                    setActiveSubtopicId(allSubtopics[idx+1].id);
+                    setActiveSubtopicId(allSubtopics[idx + 1].id);
                   }
                 }}
                 disabled={(() => {
@@ -678,20 +678,20 @@ export default function TeachingMode() {
           <>
             <div className="w-1/3 text-left">
               {currentPage > 0 ? (
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   onClick={() => setCurrentPage(prev => Math.max(0, prev - 1))}
                   className="rounded-sm border-slate-200 hover:border-[#194BFB] hover:text-[#194BFB] h-10 px-6 text-xs font-bold uppercase tracking-widest"
                 >
                   <ChevronLeft className="h-4 w-4 mr-2" /> Previous Page
                 </Button>
               ) : (
-                <Button 
+                <Button
                   variant="outline"
                   onClick={() => {
                     const allSubtopics = course?.modules?.flatMap(m => m.topics || []).flatMap(t => t.subtopics || []) || [];
                     const idx = allSubtopics.findIndex(s => s.id === activeSubtopicId);
-                    if (idx > 0) setActiveSubtopicId(allSubtopics[idx-1].id);
+                    if (idx > 0) setActiveSubtopicId(allSubtopics[idx - 1].id);
                   }}
                   disabled={(() => {
                     const allSubtopics = course?.modules?.flatMap(m => m.topics || []).flatMap(t => t.subtopics || []) || [];
@@ -710,26 +710,26 @@ export default function TeachingMode() {
             </div>
             <div className="w-1/3 text-right">
               {currentPage < totalPages - 1 ? (
-                <Button 
+                <Button
                   onClick={() => setCurrentPage(prev => prev + 1)}
                   className="bg-[#194BFB] hover:bg-[#0F3AE5] text-white rounded-sm h-10 px-6 text-xs font-bold uppercase tracking-widest"
                 >
                   Next Page <ChevronRight className="h-4 w-4 ml-2" />
                 </Button>
               ) : activeSubtopic?.task ? (
-                <Button 
+                <Button
                   onClick={() => setActiveTab('task')}
                   className="bg-[#194BFB] hover:bg-[#0F3AE5] text-white rounded-sm h-10 px-6 text-xs font-bold uppercase tracking-widest"
                 >
                   Go to Assignment <ChevronRight className="h-4 w-4 ml-2" />
                 </Button>
               ) : (
-                <Button 
+                <Button
                   onClick={() => {
                     const allSubtopics = course?.modules?.flatMap(m => m.topics || []).flatMap(t => t.subtopics || []) || [];
                     const idx = allSubtopics.findIndex(s => s.id === activeSubtopicId);
                     if (idx < allSubtopics.length - 1) {
-                      setActiveSubtopicId(allSubtopics[idx+1].id);
+                      setActiveSubtopicId(allSubtopics[idx + 1].id);
                     }
                   }}
                   disabled={(() => {
@@ -769,15 +769,15 @@ export default function TeachingMode() {
                   </div>
 
                   <div className="space-y-3">
-                    <Button 
+                    <Button
                       onClick={handleEndClass}
                       disabled={endingBusy}
                       className="w-full bg-[#EF4444] hover:bg-red-600 text-white h-11 rounded-sm font-bold uppercase tracking-widest text-xs shadow-lg shadow-red-100"
                     >
                       {endingBusy ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <><StopCircle className="h-4 w-4 mr-2" /> Yes, End Class Now</>}
                     </Button>
-                    <Button 
-                      variant="ghost" 
+                    <Button
+                      variant="ghost"
                       onClick={() => setIsEndModalOpen(false)}
                       className="w-full text-slate-500 font-bold uppercase tracking-widest text-xs h-11"
                     >
@@ -795,16 +795,16 @@ export default function TeachingMode() {
                     <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">Attendance records saved</p>
                   </div>
 
-                  <RecordingUpload 
-                    sessionId={classId} 
+                  <RecordingUpload
+                    sessionId={classId}
                     onSuccess={() => {
                       toast.success("All set! Redirecting...");
                       setTimeout(() => navigate('/mentor'), 2000);
                     }}
                   />
 
-                  <Button 
-                    variant="ghost" 
+                  <Button
+                    variant="ghost"
                     onClick={() => navigate('/mentor')}
                     className="w-full text-slate-500 font-bold uppercase tracking-widest text-xs h-11"
                   >
