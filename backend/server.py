@@ -4052,7 +4052,13 @@ async def get_course(course_id: str, user: dict = Depends(get_current_user)):
                 t["unlocked"] = True
             else:
                 prev_t = ordered_topics[i-1]
-                t["unlocked"] = all(s.get("completed", False) for s in prev_t.get("subtopics", []))
+                # A topic N+1 is unlocked only if all MANDATORY subtopics in topic N are completed
+                mandatory_prev_subs = [s for s in prev_t.get("subtopics", []) if s.get("is_mandatory", True) is not False]
+                if mandatory_prev_subs:
+                    t["unlocked"] = all(s.get("completed", False) for s in mandatory_prev_subs)
+                else:
+                    # Fallback if no mandatory subtopics exist: check if all are completed or if it's empty
+                    t["unlocked"] = all(s.get("completed", False) for s in prev_t.get("subtopics", []))
             
             # 2. Subtopic unlocking logic (Sequential within the topic)
             subs = t.get("subtopics", [])
@@ -4063,10 +4069,16 @@ async def get_course(course_id: str, user: dict = Depends(get_current_user)):
                 if j == 0:
                     s["unlocked"] = t.get("unlocked", False)
                 else:
-                    prev_s = subs[j-1]
-                    s["unlocked"] = prev_s.get("completed", False) and t.get("unlocked", False)
+                    # Unlocked if topic is unlocked and all preceding MANDATORY subtopics are completed
+                    prev_mandatory_subs = [ps for ps in subs[:j] if ps.get("is_mandatory", True) is not False]
+                    s["unlocked"] = all(ps.get("completed", False) for ps in prev_mandatory_subs) and t.get("unlocked", False)
             
-            t["completed"] = all(s.get("completed", False) for s in subs) if subs else False
+            # Topic is completed if all MANDATORY subtopics are completed
+            mandatory_subs = [s for s in subs if s.get("is_mandatory", True) is not False]
+            if mandatory_subs:
+                t["completed"] = all(s.get("completed", False) for s in mandatory_subs)
+            else:
+                t["completed"] = all(s.get("completed", False) for s in subs) if subs else False
     else:
         # Mentors/Admins
         for t in ordered_topics:

@@ -354,9 +354,7 @@ export default function SubtopicView() {
                                 {t.subtopics?.map((s, si) => {
                                   const isCurrent = s.id === id;
                                   const isCompleted = s.completed;
-                                  // Sequential logic: Unlocked if it's the first subtopic or the previous one is completed
-                                  const prevCompleted = si === 0 || t.subtopics[si - 1].completed;
-                                  const isLocked = (!t.unlocked || !prevCompleted) && user?.role === 'student';
+                                  const isLocked = s.unlocked === false && user?.role === 'student';
                                   
                                   const content = (
                                     <Link
