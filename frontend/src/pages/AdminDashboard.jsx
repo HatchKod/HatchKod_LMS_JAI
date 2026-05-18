@@ -42,7 +42,6 @@ import {
   Loader2
 } from "lucide-react";
 import { toast } from "sonner";
-import AdminAttendance from "../components/admin/AdminAttendance";
 
 export default function AdminDashboard() {
   const [stats, setStats] = useState(null);
@@ -130,14 +129,6 @@ export default function AdminDashboard() {
                 <LayoutGrid className="mr-2 h-4 w-4" />
                 Batches
               </TabsTrigger>
-              <TabsTrigger 
-                value="attendance" 
-                className="rounded-none border-b-2 border-transparent data-[state=active]:border-[#194BFB] data-[state=active]:bg-transparent data-[state=active]:shadow-none px-1 py-3 text-sm font-medium transition-all"
-                data-testid="tab-attendance"
-              >
-                <Clock className="mr-2 h-4 w-4" />
-                Attendance
-              </TabsTrigger>
             </TabsList>
 
             <div className="flex items-center">
@@ -164,9 +155,6 @@ export default function AdminDashboard() {
               courses={courses} 
               mentors={mentors}
             />
-          </TabsContent>
-          <TabsContent value="attendance" className="mt-0 outline-none">
-            <AdminAttendance />
           </TabsContent>
         </Tabs>
       </div>
@@ -259,6 +247,7 @@ function CoursesPanel({ courses, stats, refresh }) {
     flow_type: "linear"
   });
   const [busy, setBusy] = useState(false);
+  const [deletingCourseId, setDeletingCourseId] = useState(null);
 
   const create = async () => {
     if (!newCourse.title) return toast.error("Title is required");
@@ -275,7 +264,6 @@ function CoursesPanel({ courses, stats, refresh }) {
   };
 
   const remove = async (id) => {
-    if (!confirm("Delete this course and all its content?")) return;
     try { 
       await api.delete(`/admin/courses/${id}`); 
       toast.success("Course deleted"); 
@@ -302,19 +290,10 @@ function CoursesPanel({ courses, stats, refresh }) {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between mb-2">
-        <div className="flex gap-4">
-          <div className="bg-white px-4 py-2 border border-slate-200 rounded-sm shadow-sm">
-            <div className="text-[10px] uppercase font-bold text-slate-400">Total</div>
-            <div className="text-xl font-bold font-[Outfit]">{courses.length}</div>
-          </div>
-          <div className="bg-white px-4 py-2 border border-slate-200 rounded-sm shadow-sm">
-            <div className="text-[10px] uppercase font-bold text-emerald-500">Published</div>
-            <div className="text-xl font-bold font-[Outfit]">{stats_published}</div>
-          </div>
-          <div className="bg-white px-4 py-2 border border-slate-200 rounded-sm shadow-sm">
-            <div className="text-[10px] uppercase font-bold text-slate-400">Drafts</div>
-            <div className="text-xl font-bold font-[Outfit]">{stats_drafts}</div>
-          </div>
+        <div className="flex flex-wrap gap-2">
+          <Stat label="Total" v={courses.length} icon={BookOpen} color="border-blue-500" />
+          <Stat label="Published" v={stats_published} icon={CheckCircle} color="border-emerald-500" accent="text-emerald-600" />
+          <Stat label="Drafts" v={stats_drafts} icon={Pencil} color="border-amber-500" accent="text-amber-600" />
         </div>
         <Button onClick={() => setShowNewModal(true)} className="rounded-sm bg-[#194BFB] hover:bg-blue-700 font-bold px-6">
           <Plus className="mr-2 h-4 w-4" /> New Course
@@ -375,27 +354,53 @@ function CoursesPanel({ courses, stats, refresh }) {
                 </td>
                 <td className="px-6 py-4 text-right">
                   <div className="flex items-center justify-end gap-2">
-                    <Button variant="ghost" size="sm" asChild className="h-8 w-8 p-0 hover:bg-slate-100">
-                      <Link to={`/admin/course/${c.id}`} title="Edit Content"><Pencil className="h-3.5 w-3.5" /></Link>
-                    </Button>
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      onClick={() => togglePublish(c)}
-                      className="h-8 w-8 p-0 hover:bg-slate-100 text-slate-500"
-                      title={c.is_published ? "Unpublish" : "Publish"}
-                    >
-                      {c.is_published ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                    </Button>
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      onClick={() => remove(c.id)}
-                      className="h-8 w-8 p-0 hover:text-red-600 hover:bg-red-50 text-slate-300 group-hover:text-slate-400"
-                      title="Delete"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
+                    {deletingCourseId === c.id ? (
+                      <div className="flex items-center gap-1 justify-end">
+                        <span className="text-[10px] text-red-600 font-bold mr-1">Delete?</span>
+                        <Button 
+                          size="sm" 
+                          className="h-7 px-2 text-[10px] bg-red-600 hover:bg-red-700 text-white rounded-sm"
+                          onClick={() => {
+                            remove(c.id);
+                            setDeletingCourseId(null);
+                          }}
+                        >
+                          Confirm
+                        </Button>
+                        <Button 
+                          size="sm" 
+                          variant="ghost" 
+                          className="h-7 px-2 text-[10px] rounded-sm hover:bg-slate-100"
+                          onClick={() => setDeletingCourseId(null)}
+                        >
+                          No
+                        </Button>
+                      </div>
+                    ) : (
+                      <>
+                        <Button variant="ghost" size="sm" asChild className="h-8 w-8 p-0 hover:bg-slate-100">
+                          <Link to={`/admin/course/${c.id}`} title="Edit Content"><Pencil className="h-3.5 w-3.5" /></Link>
+                        </Button>
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          onClick={() => togglePublish(c)}
+                          className="h-8 w-8 p-0 hover:bg-slate-100 text-slate-500"
+                          title={c.is_published ? "Unpublish" : "Publish"}
+                        >
+                          {c.is_published ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                        </Button>
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          onClick={() => setDeletingCourseId(c.id)}
+                          className="h-8 w-8 p-0 hover:text-red-600 hover:bg-red-50 text-slate-300 group-hover:text-slate-400"
+                          title="Delete"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </td>
               </tr>
@@ -526,8 +531,6 @@ function UsersPanel({ students, mentors, inactiveUsers, stats, refresh }) {
         <div className="flex flex-wrap gap-2">
           <Stat label="Students" v={stats.students} icon={Users} color="border-blue-500" />
           <Stat label="Mentors" v={stats.mentors} icon={UserCheck} color="border-blue-500" />
-          <Stat label="Pending" v={stats.pending_submissions} icon={Clock} color="border-amber-500" accent="text-amber-600" />
-          <Stat label="Approved" v={stats.approved_submissions} icon={CheckCircle} color="border-emerald-500" accent="text-emerald-600" />
         </div>
       )}
 
@@ -551,19 +554,6 @@ function UsersPanel({ students, mentors, inactiveUsers, stats, refresh }) {
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
-                  <Select value={s.assigned_mentor_id || ""} onValueChange={(v) => assign(s.id, v)}>
-                    <SelectTrigger className="h-8 w-40 text-[11px] rounded-md bg-white border-slate-200 group-hover:border-[#194BFB]/30 transition-colors" data-testid={`admin-assign-select-${s.id}`}>
-                      <SelectValue placeholder="Assign mentor" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {mentors.map((m) => (
-                        <SelectItem key={m.id} value={m.id} className="text-xs">
-                          {m.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-slate-600">
@@ -600,9 +590,6 @@ function UsersPanel({ students, mentors, inactiveUsers, stats, refresh }) {
                   <div>
                     <div className="font-bold text-slate-900 leading-tight flex items-center gap-2">
                       {m.name}
-                      <span className="px-1.5 py-0.5 rounded-full bg-blue-50 text-[9px] text-blue-600 font-bold border border-blue-100">
-                        {mentorStats[m.id] || 0} Students
-                      </span>
                     </div>
                     <div className="text-xs text-slate-500 font-medium">{m.email}</div>
                   </div>

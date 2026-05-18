@@ -50,8 +50,8 @@ export default function RecordingsLibrary() {
 
   const filtered = useMemo(() => {
     return recordings.filter(r => 
-      r.lesson_title.toLowerCase().includes(search.toLowerCase()) ||
-      r.module_title.toLowerCase().includes(search.toLowerCase())
+      (r.custom_topic || r.lesson_title || "").toLowerCase().includes(search.toLowerCase()) ||
+      (r.module_title || "").toLowerCase().includes(search.toLowerCase())
     );
   }, [recordings, search]);
 
@@ -152,7 +152,9 @@ function RecordingCard({ recording }) {
         </div>
 
         <div className="flex-1 min-w-0">
-          <h4 className="text-sm font-bold text-slate-800 truncate group-hover:text-[#194BFB] transition-colors">{recording.lesson_title}</h4>
+          <h4 className="text-sm font-bold text-slate-800 truncate group-hover:text-[#194BFB] transition-colors">
+            {recording.custom_topic || recording.lesson_title || "Live Class"}
+          </h4>
           <div className="flex items-center gap-2 text-[10px] text-slate-400 font-bold uppercase tracking-tight mt-1">
             <div className="flex items-center gap-1"><Clock className="h-3 w-3" /> {recording.duration_minutes ? `${recording.duration_minutes} min` : 'Duration unknown'}</div>
             <span className="text-slate-200">|</span>

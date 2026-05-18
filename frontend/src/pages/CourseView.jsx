@@ -2,12 +2,10 @@ import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import { api } from "../lib/api";
-import { Card } from "../components/ui/card";
-import { Lock, CheckCircle2, PlayCircle } from "lucide-react";
+import { Lock, CheckCircle2, Folder, ChevronDown, ChevronUp, Circle } from "lucide-react";
 import StatusPill from "../components/StatusPill";
 import { useAuth } from "../lib/auth";
-import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "../components/ui/tooltip";
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "../components/ui/accordion";
+import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from "../components/ui/tooltip";
 import { toast } from "sonner";
 import { supabase } from "../lib/supabase";
 
@@ -15,129 +13,192 @@ export default function CourseView() {
   const { id } = useParams();
   const { user } = useAuth();
   const [course, setCourse] = useState(null);
+  const [openModules, setOpenModules] = useState({});
+  const [openTopics, setOpenTopics] = useState({});
 
   const load = async () => {
     const { data } = await api.get(`/courses/${id}`);
     setCourse(data);
+    // Open all modules and topics by default
+    if (data?.modules) {
+      const mOpen = {};
+      const tOpen = {};
+      data.modules.forEach(m => {
+        mOpen[m.id] = true;
+        (m.topics || []).forEach(t => { tOpen[t.id] = true; });
+      });
+      setOpenModules(mOpen);
+      setOpenTopics(tOpen);
+    }
   };
 
   useEffect(() => {
     load();
-
-    // Real-time sync for course view
     const channel = supabase.channel(`course_view_${id}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'courses', filter: `id=eq.${id}` }, load)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'modules', filter: `course_id=eq.${id}` }, load)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'lessons' }, load) // Simplified for lessons
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'topics' }, load)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'subtopics' }, load)
       .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => supabase.removeChannel(channel);
   }, [id]);
-
-  useEffect(() => {
-    if (course && window.location.hash) {
-      const hash = window.location.hash.replace('#', '');
-      const element = document.getElementById(hash);
-      if (element) {
-        element.scrollIntoView({ behavior: 'smooth' });
-      }
-    }
-  }, [course]);
 
   if (!course) {
     return (
-      <div className="min-h-screen bg-slate-50/30">
+      <div className="min-h-screen bg-white">
         <Navbar />
-        <TooltipProvider>
-          <div className="max-w-4xl mx-auto py-16 px-6">
-            <div className="mx-auto max-w-7xl p-6 text-sm text-slate-500">Loading…</div>
-          </div>
-        </TooltipProvider>
+        <div className="max-w-4xl mx-auto py-16 px-6 text-sm text-slate-400">Loading…</div>
       </div>
     );
   }
 
-  const totalLessons = course.modules.reduce((acc, m) => acc + m.lessons.length, 0);
-  const completedLessons = course.modules.reduce((acc, m) => acc + m.lessons.filter(l => l.completed).length, 0);
-  const progress = totalLessons > 0 ? Math.round((completedLessons / totalLessons) * 100) : 0;
+  const toggleModule = (mid) => setOpenModules(p => ({ ...p, [mid]: !p[mid] }));
+  const toggleTopic = (tid) => setOpenTopics(p => ({ ...p, [tid]: !p[tid] }));
 
   return (
     <TooltipProvider>
       <div className="min-h-screen bg-white">
         <Navbar />
-        <div className="mx-auto max-w-5xl px-4 sm:px-6 py-8 fade-in">
-          <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500 mb-2">Course</div>
-          <h1 className="text-3xl sm:text-4xl font-bold tracking-tight" data-testid="course-title">{course.title}</h1>
-          <p className="mt-2 text-slate-600 max-w-2xl">{course.description}</p>
+        <div className="mx-auto max-w-4xl px-4 sm:px-6 py-10">
 
-          <div className="mt-8 space-y-6">
-            {course.modules.map((m, mi) => (
-              <Card key={m.id} className="rounded-sm border-border" data-testid={`module-card-${m.id}`}>
-                <div className="border-b border-border p-4 bg-[#F4F5F7] flex items-center justify-between">
-                  <div>
-                    <div className="text-[10px] uppercase tracking-[0.22em] text-slate-500">Module {mi + 1}</div>
-                    <div className="font-[Outfit] text-lg font-semibold">{m.title}</div>
+          {/* Header */}
+          <div className="mb-8 text-center">
+            <p className="text-[11px] uppercase tracking-widest text-slate-400 mb-1">Course</p>
+            <h1 className="text-3xl font-bold tracking-tight text-slate-900" data-testid="course-title">
+              {course.title}
+            </h1>
+            {course.description && (
+              <p className="mt-2 text-slate-500 text-sm max-w-2xl mx-auto">{course.description}</p>
+            )}
+          </div>
+
+          {/* Syllabus title */}
+          <div className="text-center text-base font-semibold text-slate-700 mb-6 border-b pb-4">
+            Syllabus
+          </div>
+
+          {/* Modules */}
+          <div className="divide-y divide-slate-100 border border-slate-200 rounded-lg overflow-hidden">
+            {course.modules.map((m) => (
+              <div key={m.id} data-testid={`module-card-${m.id}`}>
+                {/* Module Row */}
+                <button
+                  onClick={() => toggleModule(m.id)}
+                  className="w-full flex items-center justify-between px-5 py-4 bg-white hover:bg-slate-50 transition-colors text-left"
+                >
+                  <div className="flex items-center gap-3">
+                    <Folder className="h-5 w-5 text-blue-500 fill-blue-100" />
+                    <span className="font-semibold text-slate-800 text-sm">{m.title}</span>
                   </div>
-                  <div className="font-mono text-xs text-slate-500">{m.lessons.length} lessons</div>
-                </div>
-                <div>
-                  {m.lessons.map((l, li) => {
-                    const locked = user?.role === "student" && !l.unlocked;
-                    return (
-                      <LessonRow key={l.id} lesson={l} li={li} locked={locked} />
-                    );
-                  })}
-                </div>
-              </Card>
+                  {openModules[m.id]
+                    ? <span className="text-slate-400 text-lg font-light">−</span>
+                    : <span className="text-slate-400 text-lg font-light">+</span>
+                  }
+                </button>
+
+                {/* Topics */}
+                {openModules[m.id] && (
+                  <div className="divide-y divide-slate-100">
+                    {(m.topics || []).map((t) => (
+                      <div key={t.id} className="bg-slate-50/50">
+                        {/* Topic Row */}
+                        <button
+                          onClick={() => toggleTopic(t.id)}
+                          className="w-full flex items-center justify-between px-6 py-3 hover:bg-slate-100/60 transition-colors text-left"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className={`h-2.5 w-2.5 rounded-full ${t.unlocked === false ? 'bg-slate-300' : 'bg-blue-500'}`} />
+                            <span className="font-medium text-slate-700 text-sm">{t.title}</span>
+                          </div>
+                          {openTopics[t.id]
+                            ? <span className="text-slate-400 text-lg font-light">−</span>
+                            : <span className="text-slate-400 text-lg font-light">+</span>
+                          }
+                        </button>
+
+                        {/* Subtopics */}
+                        {openTopics[t.id] && (
+                          <div className="divide-y divide-slate-100/80">
+                            {(t.subtopics || []).map((s) => {
+                              const locked = user?.role === "student" && s.unlocked === false;
+                              const type = s.task ? "Practice" : "Learn";
+                              const typeColor = s.task ? "text-emerald-700 font-bold" : "text-blue-700 font-bold";
+
+                              const Row = (
+                                <div
+                                  className={`flex items-center gap-4 px-8 py-3 ${
+                                    locked
+                                      ? "opacity-50 cursor-not-allowed bg-white"
+                                      : "hover:bg-slate-100 cursor-pointer bg-white"
+                                  } ${s.completed ? "bg-emerald-50/30" : ""}`}
+                                >
+                                  {/* Status icon */}
+                                  <div className="shrink-0">
+                                    {s.completed
+                                      ? <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+                                      : locked
+                                        ? <Lock className="h-4 w-4 text-slate-300" />
+                                        : <div className="h-5 w-5 rounded-full border-2 border-slate-300" />
+                                    }
+                                  </div>
+
+                                  {/* Type label */}
+                                  <span className={`text-xs w-14 shrink-0 ${typeColor}`}>{type}</span>
+
+                                  {/* Title */}
+                                  <span className="text-sm text-slate-700 flex-1">{s.title}</span>
+
+                                  {/* Submission status */}
+                                  {s.submission && <StatusPill status={s.submission.status} />}
+                                </div>
+                              );
+
+                              if (locked) return (
+                                <Tooltip key={s.id}>
+                                  <TooltipTrigger asChild>
+                                    <div className="relative group/lock">
+                                      <div className="absolute inset-0 z-10 cursor-not-allowed" />
+                                      {Row}
+                                    </div>
+                                  </TooltipTrigger>
+                                  <TooltipContent 
+                                    side="right" 
+                                    className="bg-[#FF0000] text-white border-none rounded-sm p-3 shadow-xl"
+                                  >
+                                    <div className="space-y-1">
+                                      <div className="text-[10px] font-black tracking-[0.2em] uppercase opacity-80">Locked</div>
+                                      <div className="text-[11px] font-bold">Complete the previous topic to unlock this one.</div>
+                                    </div>
+                                  </TooltipContent>
+                                </Tooltip>
+                              );
+
+                              return (
+                                <Link key={s.id} to={`/subtopic/${s.id}`} data-testid={`subtopic-row-${s.id}`}>
+                                  {Row}
+                                </Link>
+                              );
+                            })}
+                            {(t.subtopics || []).length === 0 && (
+                              <div className="px-8 py-3 text-xs text-slate-400 bg-white">No subtopics yet.</div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                    {(m.topics || []).length === 0 && (
+                      <div className="px-6 py-3 text-xs text-slate-400">No topics yet.</div>
+                    )}
+                  </div>
+                )}
+              </div>
             ))}
             {course.modules.length === 0 && (
-              <div className="text-sm text-slate-500">No modules yet.</div>
+              <div className="px-5 py-8 text-sm text-slate-400 text-center">No content yet.</div>
             )}
           </div>
         </div>
       </div>
     </TooltipProvider>
   );
-}
-
-function LessonRow({ lesson, li, locked }) {
-  const Inner = (
-    <div
-      onClick={() => locked && toast.error("Complete the previous lesson to unlock this one")}
-      className={`flex items-center justify-between gap-4 p-4 border-b last:border-b-0 border-border ${locked ? "opacity-60 cursor-not-allowed" : "hover:bg-slate-50 cursor-pointer"}`}
-    >
-      <div className="flex items-center gap-3 min-w-0">
-        <span className="grid h-7 w-7 place-items-center bg-[#F4F5F7] border border-border font-mono text-xs">
-          {li + 1}
-        </span>
-        <div className="min-w-0">
-          <div className="font-semibold truncate text-slate-900">{lesson.title}</div>
-          <div className="text-[10px] text-slate-500 truncate uppercase tracking-wide">
-            {lesson.task ? "Coding Task" : "Reading Only"}
-          </div>
-        </div>
-      </div>
-      <div className="flex items-center gap-3 shrink-0">
-        {lesson.submission && <StatusPill status={lesson.submission.status} />}
-        {lesson.completed && <CheckCircle2 className="h-4 w-4 text-emerald-600" />}
-        {locked ? <Lock className="h-4 w-4 text-slate-400" /> : <PlayCircle className="h-4 w-4 text-[#194BFB]" />}
-      </div>
-    </div>
-  );
-
-  if (locked) {
-    return (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <div className="w-full">{Inner}</div>
-        </TooltipTrigger>
-        <TooltipContent side="right">
-          Complete previous task to unlock
-        </TooltipContent>
-      </Tooltip>
-    );
-  }
-  return <Link to={`/lesson/${lesson.id}`} data-testid={`lesson-row-${lesson.id}`}>{Inner}</Link>;
 }

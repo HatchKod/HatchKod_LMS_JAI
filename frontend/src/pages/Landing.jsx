@@ -107,7 +107,7 @@ export default function Landing() {
                   <div className="mt-8 animate-bounce-slow">
                     <span className="text-emerald-400 font-bold">$</span>
                     <span className="text-[#9bb6ff] ml-2">hatchkod status --check</span>
-                    <div className="mt-1 text-emerald-400 font-bold bg-emerald-400/10 px-2 py-1 rounded inline-block">✓ TASK APPROVED! Unlocking Lesson 5...</div>
+                    <div className="mt-1 text-emerald-400 font-bold bg-emerald-400/10 px-2 py-1 rounded inline-block">✓ TASK APPROVED! Unlocking Subtopic 5...</div>
                   </div>
                 </div>
               </div>
@@ -147,7 +147,7 @@ export default function Landing() {
               </h2>
               <p className="mt-6 text-lg text-slate-600 leading-relaxed max-w-xl">
                 The HatchKod curriculum is a series of engineering challenges. 
-                You cannot move to Lesson 2 until you have successfully built and pushed the task for Lesson 1. 
+                You cannot move to Subtopic 2 until you have successfully built and pushed the task for Subtopic 1. 
                 Real progress requires real code.
               </p>
               
@@ -162,14 +162,14 @@ export default function Landing() {
                 />
                 <FeatureItem 
                   title="GitHub Portfolio" 
-                  desc="Every lesson completed adds a production-ready commit to your profile." 
+                  desc="Every subtopic completed adds a production-ready commit to your profile." 
                 />
               </div>
             </div>
             
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-4 pt-12 sm:pt-24">
-                <ProcessCard step="01" title="Learn" desc="Watch high-density lessons and read technical documentation." />
+                <ProcessCard step="01" title="Learn" desc="Watch high-density subtopics and read technical documentation." />
                 <ProcessCard step="02" title="Build" desc="Implement the task locally on your own machine." />
               </div>
               <div className="space-y-4">

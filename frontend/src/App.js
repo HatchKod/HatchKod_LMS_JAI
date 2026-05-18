@@ -9,7 +9,7 @@ import Login from "./pages/Login";
 import Register from "./pages/Register";
 import StudentDashboard from "./pages/StudentDashboard";
 import CourseView from "./pages/CourseView";
-import LessonView from "./pages/LessonView";
+import SubtopicView from "./pages/SubtopicView";
 import MentorDashboard from "./pages/MentorDashboard";
 import AdminDashboard from "./pages/AdminDashboard";
 
@@ -53,8 +53,8 @@ export default function App() {
               <Route path="/course/:id" element={
                 <ProtectedRoute roles={["student", "mentor", "admin"]}><CourseView /></ProtectedRoute>
               } />
-              <Route path="/lesson/:id" element={
-                <ProtectedRoute roles={["student", "mentor", "admin"]}><LessonView /></ProtectedRoute>
+              <Route path="/subtopic/:id" element={
+                <ProtectedRoute roles={["student", "mentor", "admin"]}><SubtopicView /></ProtectedRoute>
               } />
               <Route path="/mentor" element={
                 <ProtectedRoute roles={["mentor"]}><MentorDashboard /></ProtectedRoute>

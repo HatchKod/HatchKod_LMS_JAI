@@ -49,14 +49,17 @@ export default function AdminCourseEditor() {
   const [course, setCourse] = useState(null);
   const [modules, setModules] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [selectedLesson, setSelectedLesson] = useState(null);
+  const [selectedSubtopic, setSelectedSubtopic] = useState(null);
   const [activeModuleId, setActiveModuleId] = useState(null);
-  const [activeLessonId, setActiveLessonId] = useState(null);
+  const [activeTopicId, setActiveTopicId] = useState(null);
+  const [activeSubtopicId, setActiveSubtopicId] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showModuleModal, setShowModuleModal] = useState(false);
-  const [showLessonModal, setShowLessonModal] = useState(false);
+  const [showTopicModal, setShowTopicModal] = useState(false);
+  const [showSubtopicModal, setShowSubtopicModal] = useState(false);
   const [showDeleteModuleModal, setShowDeleteModuleModal] = useState(false);
-  const [showDeleteLessonModal, setShowDeleteLessonModal] = useState(false);
+  const [showDeleteTopicModal, setShowDeleteTopicModal] = useState(false);
+  const [showDeleteSubtopicModal, setShowDeleteSubtopicModal] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -66,16 +69,16 @@ export default function AdminCourseEditor() {
       const res = await api.get(`/courses/${id}/full`);
       setCourse(res.data.course);
       setModules(res.data.modules || []);
-      // Auto-select first lesson if none selected
-      if (!selectedLesson && res.data.modules?.[0]?.lessons?.[0]) {
-        setSelectedLesson(res.data.modules[0].lessons[0]);
+      // Auto-select first subtopic if none selected
+      if (!selectedSubtopic && res.data.modules?.[0]?.topics?.[0]?.subtopics?.[0]) {
+        setSelectedSubtopic(res.data.modules[0].topics[0].subtopics[0]);
       }
     } catch (e) {
       toast.error("Failed to load course details");
     } finally {
       setLoading(false);
     }
-  }, [id, selectedLesson]);
+  }, [id]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -110,7 +113,7 @@ export default function AdminCourseEditor() {
         title: newTitle, 
         sequence_order: modules.length 
       });
-      const newModule = { ...res.data, lessons: [] };
+      const newModule = { ...res.data, topics: [] };
       setModules([...modules, newModule]);
       toast.success("Module added");
       setShowModuleModal(false);
@@ -133,59 +136,126 @@ export default function AdminCourseEditor() {
     }
   };
 
-  // --- Lesson Actions ---
-  const handleAddLesson = async () => {
+  // --- Topic Actions ---
+  const handleAddTopic = async () => {
     if (!newTitle.trim() || !activeModuleId) return;
     try {
       const module = modules.find(m => m.id === activeModuleId);
-      const res = await api.post(`/admin/modules/${activeModuleId}/lessons`, { 
+      const res = await api.post(`/admin/modules/${activeModuleId}/topics`, { 
         title: newTitle, 
-        sequence_order: module.lessons?.length || 0 
+        sequence_order: module.topics?.length || 0 
       });
       const newModules = modules.map(m => 
-        m.id === activeModuleId ? { ...m, lessons: [...(m.lessons || []), res.data] } : m
+        m.id === activeModuleId ? { ...m, topics: [...(m.topics || []), { ...res.data, subtopics: [] }] } : m
       );
       setModules(newModules);
-      setSelectedLesson(res.data);
-      toast.success("Lesson added");
-      setShowLessonModal(false);
+      toast.success("Topic added");
+      setShowTopicModal(false);
       setNewTitle("");
     } catch (e) {
-      toast.error("Failed to add lesson");
+      toast.error("Failed to add topic");
     }
   };
 
-  const updateLessonData = async (lessonId, data) => {
-    setSaving(true);
+  const handleDeleteTopic = async () => {
+    if (!activeTopicId) return;
     try {
-      await api.put(`/admin/lessons/${lessonId}`, data);
+      await api.delete(`/admin/topics/${activeTopicId}`);
       setModules(modules.map(m => ({
         ...m,
-        lessons: m.lessons.map(l => l.id === lessonId ? { ...l, ...data } : l)
+        topics: (m.topics || []).filter(t => t.id !== activeTopicId)
       })));
-      if (selectedLesson?.id === lessonId) {
-        setSelectedLesson({ ...selectedLesson, ...data });
-      }
+      toast.success("Topic deleted");
+      setShowDeleteTopicModal(false);
+      setActiveTopicId(null);
     } catch (e) {
-      toast.error("Failed to save lesson");
+      toast.error(formatApiError(e.response?.data?.detail));
+    }
+  };
+
+  const updateTopicData = async (topicId, data) => {
+    setSaving(true);
+    try {
+      await api.put(`/admin/topics/${topicId}`, data);
+      setModules(modules.map(m => ({
+        ...m,
+        topics: (m.topics || []).map(t => t.id === topicId ? { ...t, ...data } : t)
+      })));
+      toast.success("Topic updated");
+    } catch (e) {
+      toast.error("Failed to update topic");
     } finally {
       setSaving(false);
     }
   };
 
-  const handleDeleteLesson = async () => {
-    if (!activeModuleId || !activeLessonId) return;
+  const handleAddSubtopic = async () => {
+    if (!newTitle.trim() || !activeTopicId) return;
     try {
-      await api.delete(`/admin/lessons/${activeLessonId}`);
-      setModules(modules.map(m => 
-        m.id === activeModuleId ? { ...m, lessons: m.lessons.filter(l => l.id !== activeLessonId) } : m
-      ));
-      if (selectedLesson?.id === activeLessonId) setSelectedLesson(null);
-      toast.success("Lesson deleted");
-      setShowDeleteLessonModal(false);
-      setActiveLessonId(null);
+      const res = await api.post(`/admin/topics/${activeTopicId}/subtopics`, { 
+        title: newTitle, 
+        sequence_order: 0 // Will be handled by state logic below
+      });
+      
+      const newModules = modules.map(m => ({
+        ...m,
+        topics: (m.topics || []).map(t => {
+          if (t.id === activeTopicId) {
+            const subs = t.subtopics || [];
+            return { ...t, subtopics: [...subs, { ...res.data, sequence_order: subs.length }] };
+          }
+          return t;
+        })
+      }));
+      
+      setModules(newModules);
+      setSelectedSubtopic(res.data);
+      toast.success("Subtopic added");
+      setShowSubtopicModal(false);
+      setNewTitle("");
     } catch (e) {
-      toast.error("Failed to delete lesson");
+      toast.error("Failed to add subtopic");
+    }
+  };
+
+  const updateSubtopicData = async (subtopicId, data) => {
+    setSaving(true);
+    try {
+      await api.put(`/admin/subtopics/${subtopicId}`, data);
+      setModules(modules.map(m => ({
+        ...m,
+        topics: (m.topics || []).map(t => ({
+          ...t,
+          subtopics: (t.subtopics || []).map(s => s.id === subtopicId ? { ...s, ...data } : s)
+        }))
+      })));
+      if (selectedSubtopic?.id === subtopicId) {
+        setSelectedSubtopic({ ...selectedSubtopic, ...data });
+      }
+    } catch (e) {
+      toast.error("Failed to save subtopic");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteSubtopic = async () => {
+    if (!activeSubtopicId) return;
+    try {
+      await api.delete(`/admin/subtopics/${activeSubtopicId}`);
+      setModules(modules.map(m => ({
+        ...m,
+        topics: (m.topics || []).map(t => ({
+          ...t,
+          subtopics: (t.subtopics || []).filter(s => s.id !== activeSubtopicId)
+        }))
+      })));
+      if (selectedSubtopic?.id === activeSubtopicId) setSelectedSubtopic(null);
+      toast.success("Subtopic deleted");
+      setShowDeleteSubtopicModal(false);
+      setActiveSubtopicId(null);
+    } catch (e) {
+      toast.error("Failed to delete subtopic");
     }
   };
 
@@ -204,23 +274,37 @@ export default function AdminCourseEditor() {
           ordered_ids: items.map(m => m.id) 
         });
       } catch (e) { toast.error("Reorder failed"); }
-    } else {
-      // Lesson reorder
-      const sourceMid = source.droppableId;
-      const destMid = destination.droppableId;
-      if (sourceMid !== destMid) {
-        toast.error("Cannot move lessons between modules yet.");
-        return;
-      }
-      const module = modules.find(m => m.id === sourceMid);
-      const items = Array.from(module.lessons);
+    } else if (type === "topic") {
+      const moduleId = source.droppableId;
+      const module = modules.find(m => m.id === moduleId);
+      if (!module) return;
+      
+      const items = Array.from(module.topics || []);
       const [reorderedItem] = items.splice(source.index, 1);
       items.splice(destination.index, 0, reorderedItem);
       
-      setModules(modules.map(m => m.id === sourceMid ? { ...m, lessons: items } : m));
+      setModules(modules.map(m => m.id === moduleId ? { ...m, topics: items } : m));
       try {
-        await api.post("/admin/lessons/reorder", { 
-          ordered_ids: items.map(l => l.id) 
+        await api.post("/admin/topics/reorder", { 
+          ordered_ids: items.map(t => t.id) 
+        });
+      } catch (e) { toast.error("Reorder failed"); }
+    } else if (type === "subtopic") {
+      const topicId = source.droppableId;
+      const topic = modules.flatMap(m => m.topics || []).find(t => t.id === topicId);
+      if (!topic) return;
+
+      const items = Array.from(topic.subtopics || []);
+      const [reorderedItem] = items.splice(source.index, 1);
+      items.splice(destination.index, 0, reorderedItem);
+
+      setModules(modules.map(m => ({
+        ...m,
+        topics: (m.topics || []).map(t => t.id === topicId ? { ...t, subtopics: items } : t)
+      })));
+      try {
+        await api.post("/admin/subtopics/reorder", { 
+          ordered_ids: items.map(s => s.id) 
         });
       } catch (e) { toast.error("Reorder failed"); }
     }
@@ -293,55 +377,92 @@ export default function AdminCourseEditor() {
                             {...provided.draggableProps}
                             className="bg-white border border-slate-200 rounded-sm overflow-hidden shadow-[0_2px_4px_rgba(0,0,0,0.02)]"
                           >
-                            <div className="p-3.5 bg-slate-50/50 flex items-center justify-between border-b border-slate-100 group">
+                            {/* Module Header */}
+                            <div className="p-3 bg-slate-50/80 flex items-center justify-between border-b border-slate-100 group">
                               <div className="flex items-center gap-2 overflow-hidden">
                                 <div {...provided.dragHandleProps} className="cursor-grab p-1 hover:bg-slate-200 rounded-sm text-slate-300 group-hover:text-slate-400 transition-colors">
                                   <GripVertical className="h-3.5 w-3.5" />
                                 </div>
-                                <span className="text-[12px] font-bold text-slate-900 truncate tracking-tight">{module.title}</span>
+                                <span className="text-[11px] font-extrabold text-slate-900 truncate tracking-widest uppercase">Module {mIndex + 1}: {module.title}</span>
                               </div>
                               <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
-                                <button onClick={() => { setActiveModuleId(module.id); setNewTitle(""); setShowLessonModal(true); }} className="p-1 hover:bg-[#194BFB]/10 rounded-sm text-[#194BFB]" title="Add Lesson"><Plus className="h-3.5 w-3.5" /></button>
+                                <button onClick={() => { setActiveModuleId(module.id); setNewTitle(""); setShowTopicModal(true); }} className="p-1 hover:bg-[#194BFB]/10 rounded-sm text-[#194BFB]" title="Add Topic"><Plus className="h-3.5 w-3.5" /></button>
                                 <button onClick={() => { setActiveModuleId(module.id); setShowDeleteModuleModal(true); }} className="p-1 hover:bg-red-50 rounded-sm text-red-500" title="Delete Module"><Trash2 className="h-3.5 w-3.5" /></button>
                               </div>
                             </div>
 
-                            <Droppable droppableId={module.id} type="lesson">
-                              {(lProvided) => (
-                                <div {...lProvided.droppableProps} ref={lProvided.innerRef} className="p-1.5 space-y-1 min-h-[10px]">
-                                  {module.lessons?.map((lesson, lIndex) => (
-                                    <Draggable key={lesson.id} draggableId={lesson.id} index={lIndex}>
-                                      {(lDraggable) => (
-                                        <div
-                                          ref={lDraggable.innerRef}
-                                          {...lDraggable.draggableProps}
-                                          {...lDraggable.dragHandleProps}
-                                          onClick={() => setSelectedLesson(lesson)}
-                                          className={`p-2.5 rounded-sm text-[13px] font-medium flex items-center justify-between group transition-all duration-200 ${
-                                            selectedLesson?.id === lesson.id 
-                                            ? 'bg-[#194BFB] text-white shadow-lg shadow-blue-100 ring-1 ring-blue-400' 
-                                            : 'hover:bg-slate-50 text-slate-600 border border-transparent hover:border-slate-200'
-                                          }`}
-                                        >
-                                          <div className="flex items-center gap-3 overflow-hidden">
-                                            {lesson.video_url ? (
-                                              <Video className={`h-3.5 w-3.5 shrink-0 ${selectedLesson?.id === lesson.id ? 'text-blue-100' : 'text-slate-400'}`} />
-                                            ) : (
-                                              <Layers className={`h-3.5 w-3.5 shrink-0 ${selectedLesson?.id === lesson.id ? 'text-blue-100' : 'text-slate-400'}`} />
-                                            )}
-                                            <span className="truncate tracking-tight">{lesson.title}</span>
+                            {/* Topics Container */}
+                            <Droppable droppableId={module.id} type="topic">
+                              {(tProvided) => (
+                                <div {...tProvided.droppableProps} ref={tProvided.innerRef} className="p-2 space-y-4 min-h-[10px] bg-white">
+                                  {(module.topics || []).map((topic, tIndex) => (
+                                    <Draggable key={topic.id} draggableId={topic.id} index={tIndex}>
+                                      {(tDraggable) => (
+                                        <div ref={tDraggable.innerRef} {...tDraggable.draggableProps} className="space-y-2">
+                                          {/* Topic Row */}
+                                          <div className={`flex items-center justify-between group/topic bg-slate-50/50 p-2 rounded-sm border border-slate-100 ${!topic.is_published ? 'opacity-60 grayscale-[0.5]' : ''}`}>
+                                            <div className="flex items-center gap-2 overflow-hidden">
+                                              <div {...tDraggable.dragHandleProps} className="cursor-grab p-1 hover:bg-slate-200 rounded-sm text-slate-300 group-hover/topic:text-slate-400 transition-colors">
+                                                <GripVertical className="h-3 w-3" />
+                                              </div>
+                                              <span className="text-[11px] font-bold text-slate-600 truncate uppercase tracking-tight">
+                                                Topic: {topic.title} {!topic.is_published && "(Hidden)"}
+                                              </span>
+                                            </div>
+                                            <div className="flex items-center gap-1 opacity-0 group-hover/topic:opacity-100 transition-all">
+                                              <button 
+                                                onClick={() => updateTopicData(topic.id, { is_published: !topic.is_published })}
+                                                className={`p-1 rounded-sm transition-colors ${topic.is_published ? 'hover:bg-blue-50 text-blue-500' : 'hover:bg-slate-200 text-slate-400'}`}
+                                                title={topic.is_published ? "Unpublish Topic" : "Publish Topic"}
+                                              >
+                                                {topic.is_published ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
+                                              </button>
+                                              <button onClick={() => { setActiveTopicId(topic.id); setNewTitle(""); setShowSubtopicModal(true); }} className="p-1 hover:bg-[#194BFB]/10 rounded-sm text-[#194BFB]" title="Add Subtopic"><Plus className="h-3 w-3" /></button>
+                                              <button onClick={() => { setActiveTopicId(topic.id); setShowDeleteTopicModal(true); }} className="p-1 hover:bg-red-50 rounded-sm text-red-500" title="Delete Topic"><Trash2 className="h-3 w-3" /></button>
+                                            </div>
                                           </div>
-                                          <button 
-                                            onClick={(e) => { e.stopPropagation(); setActiveModuleId(module.id); setActiveLessonId(lesson.id); setShowDeleteLessonModal(true); }}
-                                            className={`opacity-0 group-hover:opacity-100 p-1 rounded-sm transition-all ${selectedLesson?.id === lesson.id ? 'hover:bg-white/20 text-white' : 'hover:bg-red-50 text-red-400'}`}
-                                          >
-                                            <Trash2 className="h-3 w-3" />
-                                          </button>
+
+                                          {/* Subtopics Container */}
+                                          <Droppable droppableId={topic.id} type="subtopic">
+                                            {(sProvided) => (
+                                              <div {...sProvided.droppableProps} ref={sProvided.innerRef} className="ml-4 space-y-1 min-h-[5px]">
+                                                {(topic.subtopics || []).map((subtopic, sIndex) => (
+                                                  <Draggable key={subtopic.id} draggableId={subtopic.id} index={sIndex}>
+                                                    {(sDraggable) => (
+                                                      <div
+                                                        ref={sDraggable.innerRef}
+                                                        {...sDraggable.draggableProps}
+                                                        {...sDraggable.dragHandleProps}
+                                                        onClick={() => setSelectedSubtopic(subtopic)}
+                                                        className={`p-2 rounded-sm text-[12px] font-medium flex items-center justify-between group/sub transition-all duration-200 ${
+                                                          selectedSubtopic?.id === subtopic.id 
+                                                          ? 'bg-[#194BFB] text-white shadow-md ring-1 ring-blue-400' 
+                                                          : 'hover:bg-slate-50 text-slate-600 border border-transparent hover:border-slate-200'
+                                                        }`}
+                                                      >
+                                                        <div className="flex items-center gap-2 overflow-hidden">
+                                                          <FileText className={`h-3 w-3 shrink-0 ${selectedSubtopic?.id === subtopic.id ? 'text-blue-100' : 'text-slate-400'}`} />
+                                                          <span className="truncate tracking-tight">{subtopic.title}</span>
+                                                        </div>
+                                                        <button 
+                                                          onClick={(e) => { e.stopPropagation(); setActiveSubtopicId(subtopic.id); setShowDeleteSubtopicModal(true); }}
+                                                          className={`opacity-0 group-hover/sub:opacity-100 p-1 rounded-sm transition-all ${selectedSubtopic?.id === subtopic.id ? 'hover:bg-white/20 text-white' : 'hover:bg-red-50 text-red-400'}`}
+                                                        >
+                                                          <Trash2 className="h-2.5 w-2.5" />
+                                                        </button>
+                                                      </div>
+                                                    )}
+                                                  </Draggable>
+                                                ))}
+                                                {sProvided.placeholder}
+                                              </div>
+                                            )}
+                                          </Droppable>
                                         </div>
                                       )}
                                     </Draggable>
                                   ))}
-                                  {lProvided.placeholder}
+                                  {tProvided.placeholder}
                                 </div>
                               )}
                             </Droppable>
@@ -358,20 +479,20 @@ export default function AdminCourseEditor() {
         </aside>
 
         {/* Right Editor: Content */}
-        <main className="flex-1 flex flex-col min-w-0 bg-white">
-          {selectedLesson ? (
-            <div className="flex flex-col h-full">
-              {/* Lesson Header */}
-              <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-white shadow-[0_4px_20px_rgba(0,0,0,0.02)]">
+        <main className="flex-1 flex flex-col min-w-0 min-h-0 bg-white">
+          {selectedSubtopic ? (
+            <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+              {/* Subtopic Header */}
+              <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-white shrink-0 shadow-[0_4px_20px_rgba(0,0,0,0.02)]">
                 <div className="flex-1">
                   <input 
                     className="text-2xl font-bold font-[Outfit] bg-transparent border-none outline-none focus:ring-0 w-full"
-                    value={selectedLesson.title}
-                    onChange={(e) => setSelectedLesson({ ...selectedLesson, title: e.target.value })}
-                    onBlur={() => updateLessonData(selectedLesson.id, { title: selectedLesson.title })}
+                    value={selectedSubtopic.title}
+                    onChange={(e) => setSelectedSubtopic({ ...selectedSubtopic, title: e.target.value })}
+                    onBlur={() => updateSubtopicData(selectedSubtopic.id, { title: selectedSubtopic.title })}
                   />
                   <div className="text-[10px] text-slate-400 mt-1 uppercase font-bold flex items-center gap-2">
-                    <span>Lesson Configuration</span>
+                    <span>Subtopic Configuration</span>
                     <span>•</span>
                     <span className="flex items-center gap-1 text-emerald-500">
                       {saving ? "Saving changes..." : <><CheckCircle2 className="h-3 w-3" /> All changes saved</>}
@@ -381,11 +502,11 @@ export default function AdminCourseEditor() {
               </div>
 
               {/* Editor Tabs */}
-              <Tabs defaultValue="learn" className="flex-1 flex flex-col">
-                <div className="px-6 border-b border-slate-100 bg-[#FBFBFC]">
+              <Tabs defaultValue="learn" className="flex-1 flex flex-col min-h-0 overflow-hidden">
+                <div className="px-6 border-b border-slate-100 bg-[#FBFBFC] shrink-0">
                   <TabsList className="h-12 bg-transparent gap-8">
                     <TabsTrigger value="learn" className="rounded-none border-b-2 border-transparent data-[state=active]:border-[#194BFB] data-[state=active]:text-[#194BFB] px-1 h-full text-xs font-bold uppercase tracking-wider">
-                      <Layout className="h-3.5 w-3.5 mr-2" /> Topic Content
+                      <Layout className="h-3.5 w-3.5 mr-2" /> Subtopic Content
                     </TabsTrigger>
                     <TabsTrigger value="video" className="rounded-none border-b-2 border-transparent data-[state=active]:border-[#194BFB] data-[state=active]:text-[#194BFB] px-1 h-full text-xs font-bold uppercase tracking-wider">
                       <Video className="h-3.5 w-3.5 mr-2" /> Video Tutorial
@@ -399,24 +520,24 @@ export default function AdminCourseEditor() {
                   </TabsList>
                 </div>
 
-                <div className="flex-1 overflow-hidden relative">
-                  <ScrollArea className="h-full">
+                <div className="flex-1 overflow-hidden relative min-h-0">
+                  <ScrollArea className="h-full w-full">
                     <div className="max-w-4xl mx-auto p-10 space-y-8 pb-32">
                       <TabsContent value="learn" className="mt-0 outline-none space-y-6">
                         <div className="space-y-3">
                           <div className="flex items-center justify-between">
-                            <Label className="text-[10px] uppercase font-bold tracking-widest text-slate-400">Topic Content (Markdown supported)</Label>
+                            <Label className="text-[10px] uppercase font-bold tracking-widest text-slate-400">Subtopic Content (Markdown supported)</Label>
                             <span className="text-[10px] text-slate-400">Use --- to split content into multiple pages</span>
                           </div>
                           <Textarea 
                             className="min-h-[400px] font-mono text-sm border-slate-200 focus:border-[#194BFB] p-4 bg-slate-50/50 rounded-sm"
-                            value={selectedLesson.content_html || ""}
-                            onChange={(e) => setSelectedLesson({ ...selectedLesson, content_html: e.target.value })}
+                            value={selectedSubtopic.content_html || ""}
+                            onChange={(e) => setSelectedSubtopic({ ...selectedSubtopic, content_html: e.target.value })}
                             placeholder="# Welcome to Java\n\nPaste your markdown content here..."
                           />
                         </div>
                         <Button 
-                          onClick={() => updateLessonData(selectedLesson.id, { content_html: selectedLesson.content_html })}
+                          onClick={() => updateSubtopicData(selectedSubtopic.id, { content_html: selectedSubtopic.content_html })}
                           className="bg-[#194BFB] hover:bg-[#0F3AE5] text-white rounded-sm h-10 px-6 font-bold shadow-lg shadow-blue-100"
                         >
                           Save Content
@@ -428,27 +549,27 @@ export default function AdminCourseEditor() {
                           <div className="space-y-3">
                             <Label className="text-[10px] uppercase font-bold tracking-widest text-slate-400">YouTube / Video URL</Label>
                             <Input 
-                              value={selectedLesson.video_url || ""}
-                              onChange={(e) => setSelectedLesson({ ...selectedLesson, video_url: e.target.value })}
+                              value={selectedSubtopic.video_url || ""}
+                              onChange={(e) => setSelectedSubtopic({ ...selectedSubtopic, video_url: e.target.value })}
                               placeholder="https://..."
                               className="rounded-sm"
                             />
-                            <p className="text-[10px] text-slate-400 italic">Paste the embed or public URL of the lesson video.</p>
+                            <p className="text-[10px] text-slate-400 italic">Paste the embed or public URL of the subtopic video.</p>
                           </div>
                           <div className="space-y-3">
                             <Label className="text-[10px] uppercase font-bold tracking-widest text-slate-400">Estimated Duration (mins)</Label>
                             <Input 
                               type="number"
-                              value={selectedLesson.estimated_minutes || 30}
-                              onChange={(e) => setSelectedLesson({ ...selectedLesson, estimated_minutes: parseInt(e.target.value) })}
+                              value={selectedSubtopic.estimated_minutes || 30}
+                              onChange={(e) => setSelectedSubtopic({ ...selectedSubtopic, estimated_minutes: parseInt(e.target.value) })}
                               className="rounded-sm"
                             />
                           </div>
                         </div>
                         <Button 
-                          onClick={() => updateLessonData(selectedLesson.id, { 
-                            video_url: selectedLesson.video_url,
-                            estimated_minutes: selectedLesson.estimated_minutes 
+                          onClick={() => updateSubtopicData(selectedSubtopic.id, { 
+                            video_url: selectedSubtopic.video_url,
+                            estimated_minutes: selectedSubtopic.estimated_minutes 
                           })}
                           className="bg-[#194BFB] hover:bg-[#0F3AE5] text-white rounded-sm h-10 px-6 font-bold shadow-lg shadow-blue-100"
                         >
@@ -457,7 +578,7 @@ export default function AdminCourseEditor() {
                       </TabsContent>
 
                       <TabsContent value="task" className="mt-0 outline-none">
-                        <TaskEditor lessonId={selectedLesson.id} />
+                        <TaskEditor subtopicId={selectedSubtopic.id} />
                       </TabsContent>
 
                       <TabsContent value="settings" className="mt-0 outline-none space-y-8">
@@ -467,26 +588,26 @@ export default function AdminCourseEditor() {
                               <div className="flex items-center justify-between p-4 bg-white border border-slate-100 rounded-sm">
                                 <div>
                                   <div className="text-xs font-bold">Published Status</div>
-                                  <div className="text-[10px] text-slate-400">Make this lesson visible to students</div>
+                                  <div className="text-[10px] text-slate-400">Make this subtopic visible to students</div>
                                 </div>
                                 <button 
-                                  onClick={() => updateLessonData(selectedLesson.id, { is_published: !selectedLesson.is_published })}
-                                  className={`h-6 w-11 rounded-full relative transition-colors ${selectedLesson.is_published ? 'bg-[#194BFB]' : 'bg-slate-200'}`}
+                                  onClick={() => updateSubtopicData(selectedSubtopic.id, { is_published: !selectedSubtopic.is_published })}
+                                  className={`h-6 w-11 rounded-full relative transition-colors ${selectedSubtopic.is_published ? 'bg-[#194BFB]' : 'bg-slate-200'}`}
                                 >
-                                  <div className={`absolute top-1 left-1 bg-white h-4 w-4 rounded-full transition-transform ${selectedLesson.is_published ? 'translate-x-5' : ''}`} />
+                                  <div className={`absolute top-1 left-1 bg-white h-4 w-4 rounded-full transition-transform ${selectedSubtopic.is_published ? 'translate-x-5' : ''}`} />
                                 </button>
                               </div>
                               
                               <div className="flex items-center justify-between p-4 bg-white border border-slate-100 rounded-sm">
                                 <div>
                                   <div className="text-xs font-bold">Mandatory Completion</div>
-                                  <div className="text-[10px] text-slate-400">Must be completed to unlock next topic</div>
+                                  <div className="text-[10px] text-slate-400">Must be completed for Topic progress</div>
                                 </div>
                                 <button 
-                                  onClick={() => updateLessonData(selectedLesson.id, { is_mandatory: !selectedLesson.is_mandatory })}
-                                  className={`h-6 w-11 rounded-full relative transition-colors ${selectedLesson.is_mandatory ? 'bg-[#194BFB]' : 'bg-slate-200'}`}
+                                  onClick={() => updateSubtopicData(selectedSubtopic.id, { is_mandatory: !selectedSubtopic.is_mandatory })}
+                                  className={`h-6 w-11 rounded-full relative transition-colors ${selectedSubtopic.is_mandatory ? 'bg-[#194BFB]' : 'bg-slate-200'}`}
                                 >
-                                  <div className={`absolute top-1 left-1 bg-white h-4 w-4 rounded-full transition-transform ${selectedLesson.is_mandatory ? 'translate-x-5' : ''}`} />
+                                  <div className={`absolute top-1 left-1 bg-white h-4 w-4 rounded-full transition-transform ${selectedSubtopic.is_mandatory ? 'translate-x-5' : ''}`} />
                                 </button>
                               </div>
                             </div>
@@ -500,7 +621,7 @@ export default function AdminCourseEditor() {
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center text-slate-300">
               <Layout className="h-16 w-16 mb-4 opacity-10" />
-              <p className="text-sm font-bold uppercase tracking-widest opacity-30">Select a lesson to edit</p>
+              <p className="text-sm font-bold uppercase tracking-widest opacity-30">Select a subtopic to edit</p>
             </div>
           )}
         </main>
@@ -589,26 +710,50 @@ export default function AdminCourseEditor() {
         </DialogContent>
       </Dialog>
 
-      {/* New Lesson Modal */}
-      <Dialog open={showLessonModal} onOpenChange={setShowLessonModal}>
+      {/* New Topic Modal */}
+      <Dialog open={showTopicModal} onOpenChange={setShowTopicModal}>
         <DialogContent className="sm:max-w-md rounded-sm">
           <DialogHeader>
-            <DialogTitle className="font-[Outfit] font-extrabold text-xl">New Lesson</DialogTitle>
+            <DialogTitle className="font-[Outfit] font-extrabold text-xl">New Topic</DialogTitle>
           </DialogHeader>
           <div className="py-4">
-            <Label className="text-[10px] uppercase font-bold text-slate-400 tracking-widest mb-2 block">Lesson Title</Label>
+            <Label className="text-[10px] uppercase font-bold text-slate-400 tracking-widest mb-2 block">Topic Title</Label>
             <Input 
               value={newTitle} 
               onChange={(e) => setNewTitle(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleAddLesson()}
+              onKeyDown={(e) => e.key === 'Enter' && handleAddTopic()}
               placeholder="e.g. Variables and Data Types"
               autoFocus
               className="rounded-sm h-11"
             />
           </div>
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setShowLessonModal(false)} className="rounded-sm font-bold">Cancel</Button>
-            <Button onClick={handleAddLesson} disabled={!newTitle.trim()} className="bg-[#194BFB] hover:bg-[#0F3AE5] text-white rounded-sm font-bold px-8 shadow-lg shadow-blue-100">Create Lesson</Button>
+            <Button variant="ghost" onClick={() => setShowTopicModal(false)} className="rounded-sm font-bold">Cancel</Button>
+            <Button onClick={handleAddTopic} disabled={!newTitle.trim()} className="bg-[#194BFB] hover:bg-[#0F3AE5] text-white rounded-sm font-bold px-8 shadow-lg shadow-blue-100">Create Topic</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* New Subtopic Modal */}
+      <Dialog open={showSubtopicModal} onOpenChange={setShowSubtopicModal}>
+        <DialogContent className="sm:max-w-md rounded-sm">
+          <DialogHeader>
+            <DialogTitle className="font-[Outfit] font-extrabold text-xl">New Subtopic</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <Label className="text-[10px] uppercase font-bold text-slate-400 tracking-widest mb-2 block">Subtopic Title</Label>
+            <Input 
+              value={newTitle} 
+              onChange={(e) => setNewTitle(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleAddSubtopic()}
+              placeholder="e.g. Primitive vs Reference Types"
+              autoFocus
+              className="rounded-sm h-11"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setShowSubtopicModal(false)} className="rounded-sm font-bold">Cancel</Button>
+            <Button onClick={handleAddSubtopic} disabled={!newTitle.trim()} className="bg-[#194BFB] hover:bg-[#0F3AE5] text-white rounded-sm font-bold px-8 shadow-lg shadow-blue-100">Create Subtopic</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -621,7 +766,7 @@ export default function AdminCourseEditor() {
           </DialogHeader>
           <div className="py-4">
             <p className="text-sm text-slate-500 leading-relaxed">
-              Are you sure you want to delete this module? All lessons within this module must be deleted first for this action to succeed.
+              Are you sure you want to delete this module? All topics within this module must be deleted first for this action to succeed.
             </p>
           </div>
           <DialogFooter className="gap-2 sm:gap-0">
@@ -631,20 +776,38 @@ export default function AdminCourseEditor() {
         </DialogContent>
       </Dialog>
 
-      {/* Delete Lesson Confirmation */}
-      <Dialog open={showDeleteLessonModal} onOpenChange={setShowDeleteLessonModal}>
+      {/* Delete Topic Confirmation */}
+      <Dialog open={showDeleteTopicModal} onOpenChange={setShowDeleteTopicModal}>
         <DialogContent className="sm:max-w-md rounded-sm border-red-100">
           <DialogHeader>
-            <DialogTitle className="font-[Outfit] font-extrabold text-xl text-red-600">Delete Lesson</DialogTitle>
+            <DialogTitle className="font-[Outfit] font-extrabold text-xl text-red-600">Delete Topic</DialogTitle>
           </DialogHeader>
           <div className="py-4">
             <p className="text-sm text-slate-500 leading-relaxed">
-              Are you sure you want to delete this lesson? This action cannot be undone and all lesson content will be lost.
+              Are you sure you want to delete this topic? All subtopics within must be deleted first.
             </p>
           </div>
           <DialogFooter className="gap-2 sm:gap-0">
-            <Button variant="ghost" onClick={() => setShowDeleteLessonModal(false)} className="rounded-sm font-bold">Cancel</Button>
-            <Button onClick={handleDeleteLesson} className="bg-red-600 hover:bg-red-700 text-white rounded-sm font-bold px-8">Confirm Delete</Button>
+            <Button variant="ghost" onClick={() => setShowDeleteTopicModal(false)} className="rounded-sm font-bold">Cancel</Button>
+            <Button onClick={handleDeleteTopic} className="bg-red-600 hover:bg-red-700 text-white rounded-sm font-bold px-8">Confirm Delete</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Subtopic Confirmation */}
+      <Dialog open={showDeleteSubtopicModal} onOpenChange={setShowDeleteSubtopicModal}>
+        <DialogContent className="sm:max-w-md rounded-sm border-red-100">
+          <DialogHeader>
+            <DialogTitle className="font-[Outfit] font-extrabold text-xl text-red-600">Delete Subtopic</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-sm text-slate-500 leading-relaxed">
+              Are you sure you want to delete this subtopic? This action cannot be undone.
+            </p>
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="ghost" onClick={() => setShowDeleteSubtopicModal(false)} className="rounded-sm font-bold">Cancel</Button>
+            <Button onClick={handleDeleteSubtopic} className="bg-red-600 hover:bg-red-700 text-white rounded-sm font-bold px-8">Confirm Delete</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -652,16 +815,20 @@ export default function AdminCourseEditor() {
   );
 }
 
-function TaskEditor({ lessonId }) {
-  const [task, setTask] = useState(null);
-  const [loading, setLoading] = useState(true);
+function TaskEditor({ subtopicId }) {
+  const [task, setTask] = useState({
+    description: "",
+    instructions: "",
+    expected_output: "",
+    difficulty: "easy"
+  });
   const [busy, setBusy] = useState(false);
 
   const fetchTask = useCallback(async () => {
     try {
-      const res = await api.get(`/lessons/${lessonId}`);
-      if (res.data.tasks && res.data.tasks.length > 0) {
-        setTask(res.data.tasks[0]);
+      const res = await api.get(`/subtopics/${subtopicId}`);
+      if (res.data.task) {
+        setTask(res.data.task);
       } else {
         setTask({
           description: "",
@@ -672,17 +839,15 @@ function TaskEditor({ lessonId }) {
       }
     } catch (e) {
       toast.error("Failed to load task");
-    } finally {
-      setLoading(false);
     }
-  }, [lessonId]);
+  }, [subtopicId]);
 
   useEffect(() => { fetchTask(); }, [fetchTask]);
 
   const save = async () => {
     setBusy(true);
     try {
-      const res = await api.post(`/admin/lessons/${lessonId}/task`, task);
+      const res = await api.post(`/admin/subtopics/${subtopicId}/task`, task);
       setTask(res.data);
       toast.success("Task updated");
     } catch (e) {
@@ -691,8 +856,6 @@ function TaskEditor({ lessonId }) {
       setBusy(false);
     }
   };
-
-  if (loading) return <div className="p-10 text-xs font-bold text-slate-400">Loading Task...</div>;
 
   return (
     <div className="space-y-8">

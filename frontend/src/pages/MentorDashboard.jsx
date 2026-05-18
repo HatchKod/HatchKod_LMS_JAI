@@ -50,6 +50,18 @@ export default function MentorDashboard() {
     api.get("/batches/mentor").then(r => setBatches(r.data || [])).catch(() => {});
   }, []);
 
+  const selectSubmission = async (s) => {
+    setActive({ id: s.id, isLoading: true, topic: s.topic, student: s.student });
+    setFeedback("");
+    try {
+      const res = await api.get(`/submissions/${s.id}`);
+      setActive(res.data);
+    } catch (e) {
+      setActive(null);
+      toast.error("Failed to load submission details");
+    }
+  };
+
   const review = async (status) => {
     if (!active) return;
     setBusy(true);
@@ -112,11 +124,11 @@ export default function MentorDashboard() {
                       <div className="p-6 text-sm text-slate-500" data-testid="mentor-no-pending">No pending submissions.</div>
                     )}
                     {pending.map((s) => (
-                      <button key={s.id} onClick={() => { setActive(s); setFeedback(""); }}
+                      <button key={s.id} onClick={() => selectSubmission(s)}
                         className={`w-full text-left p-3 border-b last:border-b-0 border-border hover:bg-slate-50 ${active?.id === s.id ? "bg-slate-50 border-l-2 border-l-[#194BFB]" : ""}`}
                         data-testid={`mentor-pending-row-${s.id}`}>
                         <div className="flex items-center justify-between gap-2">
-                          <div className="font-medium text-sm truncate">{s.lesson?.title || "Lesson"}</div>
+                          <div className="font-medium text-sm truncate">{s.topic?.title || "Topic"}</div>
                           <StatusPill status={s.status} />
                         </div>
                         <div className="text-xs text-slate-500 mt-0.5">{s.student?.name || "Student"}</div>
@@ -129,49 +141,57 @@ export default function MentorDashboard() {
 
               <section className="lg:col-span-8">
                 {active ? (
-                  <Card className="rounded-sm border-border" data-testid="mentor-review-panel">
-                    <div className="p-5 border-b border-border bg-[#F4F5F7]">
-                      <div className="text-[10px] uppercase tracking-[0.22em] text-slate-500">Reviewing</div>
-                      <div className="font-[Outfit] text-xl font-semibold">{active.lesson?.title}</div>
-                      <div className="text-sm text-slate-600 mt-1">{active.student?.name} ({active.student?.email})</div>
+                  active.isLoading ? (
+                    <div className="border border-dashed border-border rounded-sm p-20 text-center text-sm text-slate-500 bg-slate-50/50">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#194BFB] mx-auto mb-4" />
+                      <div className="font-semibold text-slate-700">Loading submission details...</div>
+                      <div className="text-xs text-slate-400 mt-1">Fetching student's implementation & task context</div>
                     </div>
-                    <div className="p-5 space-y-4">
-                      {active.task && (
+                  ) : (
+                    <Card className="rounded-sm border-border" data-testid="mentor-review-panel">
+                      <div className="p-5 border-b border-border bg-[#F4F5F7]">
+                        <div className="text-[10px] uppercase tracking-[0.22em] text-slate-500">Reviewing</div>
+                        <div className="font-[Outfit] text-xl font-semibold">{active.topic?.title}</div>
+                        <div className="text-sm text-slate-600 mt-1">{active.student?.name} ({active.student?.email})</div>
+                      </div>
+                      <div className="p-5 space-y-4">
+                        {active.task && (
+                          <div>
+                            <div className="text-[10px] uppercase tracking-[0.22em] text-slate-500 mb-1">Task</div>
+                            <div className="text-sm">{active.task.description}</div>
+                          </div>
+                        )}
                         <div>
-                          <div className="text-[10px] uppercase tracking-[0.22em] text-slate-500 mb-1">Task</div>
-                          <div className="text-sm">{active.task.description}</div>
+                          <div className="text-[10px] uppercase tracking-[0.22em] text-slate-500 mb-1">Submission</div>
+                          {active.submission_url && (
+                            <a href={active.submission_url} target="_blank" rel="noreferrer"
+                              className="inline-flex items-center gap-2 font-mono text-sm text-[#194BFB] hover:underline" data-testid="mentor-submission-link">
+                              <Github className="h-4 w-4" /> {active.submission_url}
+                              <ExternalLink className="h-3 w-3" />
+                            </a>
+                          )}
+                          {active.submission_text && (
+                            <pre className="mt-2 font-mono text-xs whitespace-pre-wrap bg-[#F4F5F7] border border-border rounded-sm p-3">{active.submission_text}</pre>
+                          )}
                         </div>
-                      )}
-                      <div>
-                        <div className="text-[10px] uppercase tracking-[0.22em] text-slate-500 mb-1">Submission</div>
-                        {active.submission_url && (
-                          <a href={active.submission_url} target="_blank" rel="noreferrer"
-                            className="inline-flex items-center gap-2 font-mono text-sm text-[#194BFB] hover:underline" data-testid="mentor-submission-link">
-                            <Github className="h-4 w-4" /> {active.submission_url}
-                            <ExternalLink className="h-3 w-3" />
-                          </a>
-                        )}
-                        {active.submission_text && (
-                          <pre className="mt-2 font-mono text-xs whitespace-pre-wrap bg-[#F4F5F7] border border-border rounded-sm p-3">{active.submission_text}</pre>
-                        )}
+                        <div>
+                          <div className="text-[10px] uppercase tracking-[0.22em] text-slate-500 mb-1">Feedback</div>
+                          <Textarea rows={5} value={feedback} onChange={(e) => setFeedback(e.target.value)}
+                            placeholder="Write feedback for the student" className="rounded-sm" data-testid="mentor-feedback-input" />
+                        </div>
+                        <div className="flex flex-wrap gap-3 pt-2 border-t border-border">
+                          <Button onClick={() => review("approved")} disabled={busy}
+                            className="rounded-sm bg-emerald-600 hover:bg-emerald-700" data-testid="mentor-approve-btn">
+                            Approve & Unlock
+                          </Button>
+                          <Button onClick={() => review("rework")} disabled={busy} variant="outline"
+                            className="rounded-sm border-orange-500 text-orange-700 hover:bg-orange-50" data-testid="mentor-rework-btn">
+                            Request Rework
+                          </Button>
+                        </div>
                       </div>
-                      <div>
-                        <div className="text-[10px] uppercase tracking-[0.22em] text-slate-500 mb-1">Feedback</div>
-                        <Textarea rows={5} value={feedback} onChange={(e) => setFeedback(e.target.value)}
-                          placeholder="Write feedback for the student" className="rounded-sm" data-testid="mentor-feedback-input" />
-                      </div>
-                      <div className="flex flex-wrap gap-3 pt-2 border-t border-border">
-                        <Button onClick={() => review("approved")} disabled={busy}
-                          className="rounded-sm bg-emerald-600 hover:bg-emerald-700" data-testid="mentor-approve-btn">
-                          Approve & Unlock
-                        </Button>
-                        <Button onClick={() => review("rework")} disabled={busy} variant="outline"
-                          className="rounded-sm border-orange-500 text-orange-700 hover:bg-orange-50" data-testid="mentor-rework-btn">
-                          Request Rework
-                        </Button>
-                      </div>
-                    </div>
-                  </Card>
+                    </Card>
+                  )
                 ) : (
                   <div className="border border-dashed border-border rounded-sm p-10 text-center text-sm text-slate-500" data-testid="mentor-empty-state">
                     Select a submission from the left to start reviewing.

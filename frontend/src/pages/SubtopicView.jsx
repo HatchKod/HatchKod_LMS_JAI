@@ -7,7 +7,7 @@ import { Textarea } from "../components/ui/textarea";
 import { Label } from "../components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "../components/ui/dialog";
 import { Badge } from "../components/ui/badge";
-import { BookOpen, Video, ArrowLeft, Github, FileUp, Link2, ChevronLeft, ChevronRight, ClipboardCheck, FileText, Clock, Trash2, Edit3, RefreshCcw, Check, Lock, CheckCircle } from "lucide-react";
+import { BookOpen, Video, ArrowLeft, ArrowRight, Github, FileUp, Link2, ChevronLeft, ChevronRight, ClipboardCheck, FileText, Clock, Trash2, Edit3, RefreshCcw, Check, Lock, CheckCircle } from "lucide-react";
 import StatusPill from "../components/StatusPill";
 import { toast } from "sonner";
 import { useAuth } from "../lib/auth";
@@ -18,7 +18,7 @@ import Navbar from "../components/Navbar";
 import Breadcrumbs from "../components/Breadcrumbs";
 import ReactMarkdown from "react-markdown";
 
-export default function LessonView() {
+export default function SubtopicView() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -44,7 +44,7 @@ export default function LessonView() {
   const load = async () => {
     setError("");
     try {
-      const res = await api.get(`/lessons/${id}`);
+      const res = await api.get(`/subtopics/${id}`);
       setData(res.data);
       if (res.data.submission) {
         const sUrl = res.data.submission.submission_url || "";
@@ -61,7 +61,7 @@ export default function LessonView() {
         setSubmissionType("link");
       }
     } catch (e) {
-      setError(formatApiError(e.response?.data?.detail) || "Failed to load lesson");
+      setError(formatApiError(e.response?.data?.detail) || "Failed to load subtopic");
     }
   };
 
@@ -69,8 +69,8 @@ export default function LessonView() {
   useEffect(() => {
     if (!user?.id || !id) return;
     api.get(`/students/${user.id}/progress`).then(({ data }) => {
-      const allLessons = (data.modules || []).flatMap(m => m.lessons);
-      const found = allLessons.find(l => l.id === id);
+      const allSubtopics = (data.modules || []).flatMap(m => m.topics || []).flatMap(t => t.subtopics || []);
+      const found = allSubtopics.find(s => s.id === id);
       if (found) {
         setIsCompleted(found.is_completed);
         setCompletedAt(found.completed_at);
@@ -86,7 +86,7 @@ export default function LessonView() {
       if (document.visibilityState === "hidden") {
         const mins = Math.round((Date.now() - startTimeRef.current) / 60000);
         if (mins > 0) {
-          api.post(`/lessons/${id}/complete`, { time_spent_minutes: mins }).catch(() => {});
+          api.post(`/subtopics/${id}/complete`, { time_spent_minutes: mins }).catch(() => {});
         }
       } else {
         startTimeRef.current = Date.now();
@@ -97,7 +97,7 @@ export default function LessonView() {
       document.removeEventListener("visibilitychange", handleVisibility);
       const mins = Math.round((Date.now() - startTimeRef.current) / 60000);
       if (mins > 0) {
-        api.post(`/lessons/${id}/complete`, { time_spent_minutes: mins }).catch(() => {});
+        api.post(`/subtopics/${id}/complete`, { time_spent_minutes: mins }).catch(() => {});
       }
     };
   }, [id, user?.role]);
@@ -106,8 +106,8 @@ export default function LessonView() {
     load();
 
     // Listen for real-time updates from admin
-    const channel = supabase.channel(`lesson_view_${id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'lessons', filter: `id=eq.${id}` }, () => {
+    const channel = supabase.channel(`subtopic_view_${id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'subtopics', filter: `id=eq.${id}` }, () => {
         load();
       })
       .subscribe();
@@ -168,7 +168,7 @@ export default function LessonView() {
 
     setBusy(true);
     try {
-      await api.post(`/lessons/${id}/submit`, { submission_url: finalUrl, submission_text: text });
+      await api.post(`/subtopics/${id}/submit`, { submission_url: finalUrl, submission_text: text });
       toast.success("Submitted! Mentor will review shortly.");
       setIsEditing(false);
       setSubmissionError("");
@@ -199,33 +199,33 @@ export default function LessonView() {
     const elapsed = Math.round((Date.now() - startTimeRef.current) / 60000);
     setBusy(true);
     try {
-      const res = await api.post(`/lessons/${id}/complete`, { time_spent_minutes: elapsed });
+      const res = await api.post(`/subtopics/${id}/complete`, { time_spent_minutes: elapsed });
       if (res.data.gamification) {
         toast.success(`+${res.data.gamification.xp_earned} XP earned! 🔥`, {
           description: `You are now Level ${res.data.gamification.level} with a ${res.data.gamification.streak} day streak!`
         });
       } else {
-        toast.success("Lesson complete! Keep it up 🚀");
+        toast.success("Subtopic complete! Keep it up 🚀");
       }
       setIsCompleted(true);
       setCompletedAt(new Date().toISOString());
-      if (next_lesson) {
-        navigate(`/lesson/${next_lesson.id}`);
+      if (data.next_subtopic) {
+        navigate(`/subtopic/${data.next_subtopic.id}`);
       } else {
         navigate("/student/progress");
       }
+      load();
     } catch (e) {
-      toast.error(formatApiError(e.response?.data?.detail) || "Failed to complete lesson");
-    } finally {
-      setBusy(false);
-    }
+      toast.error(formatApiError(e.response?.data?.detail) || "Failed to complete subtopic");
+    } finally { setBusy(false); }
   };
 
   const handleUndoComplete = async () => {
     try {
-      await api.delete(`/lessons/${id}/complete`);
+      await api.delete(`/subtopics/${id}/complete`);
       setIsCompleted(false);
       setCompletedAt(null);
+      load();
     } catch {
       toast.error("Failed to undo completion");
     }
@@ -244,24 +244,48 @@ export default function LessonView() {
     );
   }
 
-  if (!data || !data.lesson) {
+  if (!data || !data.subtopic) {
     return (
-      <div className="min-h-screen bg-[#F4F5F7] flex flex-col items-center justify-center p-6 text-slate-500">
-        <RefreshCcw className="h-8 w-8 animate-spin mb-4 opacity-20" />
-        <div className="font-medium">Loading lesson content...</div>
-        {error && <div className="mt-4 text-xs text-red-400 bg-red-50 px-3 py-1 rounded-sm border border-red-100">{error}</div>}
+      <div className="min-h-screen bg-white">
+        <Navbar />
+        <div className="max-w-6xl mx-auto py-8 px-6 min-h-[calc(100vh-120px)] flex flex-col">
+          {/* Header Skeleton */}
+          <div className="mb-8 space-y-3">
+            <div className="h-4 w-32 bg-slate-100 rounded animate-pulse" />
+            <div className="h-10 w-2/3 bg-slate-100 rounded animate-pulse" />
+          </div>
+
+          <div className="flex flex-1 gap-8">
+            {/* Sidebar Skeleton */}
+            <div className="hidden lg:block w-80 space-y-4">
+              {[1, 2, 3, 4, 5].map(i => (
+                <div key={i} className="h-12 bg-slate-50 rounded-sm animate-pulse" />
+              ))}
+            </div>
+
+            {/* Content Area Skeleton */}
+            <div className="flex-1 space-y-6">
+              <div className="h-[400px] bg-slate-50 rounded-sm animate-pulse" />
+              <div className="space-y-3">
+                <div className="h-4 w-full bg-slate-50 rounded animate-pulse" />
+                <div className="h-4 w-5/6 bg-slate-50 rounded animate-pulse" />
+                <div className="h-4 w-4/6 bg-slate-50 rounded animate-pulse" />
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     );
   }
 
-  const { lesson, course, module, task, submission, prev_lesson, next_lesson, lesson_index, total_lessons } = data;
-  if (!lesson) return <div className="p-20 text-center">Lesson data is corrupt.</div>;
+  const { subtopic, course, module, topic, task, submission, next_subtopic, prev_subtopic, total_subtopics, subtopic_index } = data;
   
-  // Handle content from either 'content' or 'content_html' (admin editor often uses content_html)
-  const rawContent = lesson.content || lesson.content_html || "";
+  // Handle content from either 'content' or 'content_html'
+  const rawContent = subtopic.content || subtopic.content_html || "";
   const contentBlocks = rawContent.split(/\n---\n/).filter(b => b.trim());
   const isStudent = user?.role === "student";
-  const canResubmit = !submission || submission.status === "rework" || isEditing;
+  const isEditingState = isEditing;
+  const setIsEditingState = setIsEditing;
 
   const getEmbedUrl = (url) => {
     if (!url) return "";
@@ -278,7 +302,7 @@ export default function LessonView() {
   };
 
   const renderContent = (content) => {
-    if (!content) return <p className="italic text-slate-500">No content for this lesson yet.</p>;
+    if (!content) return <p className="italic text-slate-500">No content for this subtopic yet.</p>;
 
     return (
       <div className="markdown-content">
@@ -297,7 +321,7 @@ export default function LessonView() {
             <SheetTrigger asChild>
               <button className="flex items-center gap-2 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-sm text-slate-600 hover:text-[#194BFB] hover:border-[#194BFB] transition-all whitespace-nowrap group text-[11px] font-bold uppercase tracking-wider">
                 <BookOpen className="h-3.5 w-3.5 text-[#194BFB]" />
-                <span>Module {lesson_index || 1}: {module?.title}</span>
+                <span>Topic: {topic?.title}</span>
                 <ChevronRight className="h-3 w-3 ml-1 group-data-[state=open]:rotate-90 transition-transform" />
               </button>
             </SheetTrigger>
@@ -319,28 +343,63 @@ export default function LessonView() {
                         <div className="h-6 w-6 rounded-full bg-slate-900 text-white flex items-center justify-center text-[10px] font-bold">{mi + 1}</div>
                         <h4 className="font-bold text-slate-900 uppercase tracking-wider text-xs">{m.title}</h4>
                       </div>
-                      <div className="space-y-2 ml-9">
-                        {m.lessons?.map((l) => {
-                          const isCurrent = l.id === id;
-                          const isCompleted = l.completed;
-                          const isLocked = !l.unlocked && user?.role === 'student';
-                          return (
-                            <Link
-                              key={l.id}
-                              to={isLocked ? '#' : `/lesson/${l.id}`}
-                              onClick={() => !isLocked && setIsSyllabusOpen(false)}
-                              className={`flex items-center justify-between p-3 rounded-sm border transition-all ${isCurrent ? 'bg-[#194BFB]/5 border-[#194BFB] ring-1 ring-[#194BFB]/10' : (isLocked ? 'bg-slate-50 border-slate-100 opacity-60 cursor-not-allowed' : 'bg-white border-slate-200 hover:border-[#194BFB] hover:shadow-sm')}`}
-                            >
-                              <div className="flex items-center gap-3 min-w-0">
-                                <div className={`h-5 w-5 rounded-full flex items-center justify-center shrink-0 border ${isCompleted ? 'bg-emerald-500 border-emerald-500 text-white' : 'bg-white border-slate-200'}`}>
-                                  {isCompleted ? <Check className="h-3 w-3 stroke-[3]" /> : (isLocked ? <Lock className="h-2.5 w-2.5 text-slate-400" /> : <div className="h-1.5 w-1.5 rounded-full bg-slate-200" />)}
-                                </div>
-                                <span className={`text-sm font-bold truncate ${isCurrent ? 'text-[#194BFB]' : (isLocked ? 'text-slate-400' : 'text-slate-700')}`}>{l.title}</span>
+                      <div className="space-y-4 ml-6">
+                        {m.topics?.map((t, ti) => (
+                          <div key={t.id} className="space-y-2">
+                            <div className="flex items-center gap-2 px-3 py-1">
+                               <div className="h-1.5 w-1.5 rounded-full bg-slate-300" />
+                               <span className="text-xs font-bold text-slate-500 uppercase tracking-tight">Topic: {t.title}</span>
+                            </div>
+                              <div className="space-y-1 ml-3">
+                                {t.subtopics?.map((s, si) => {
+                                  const isCurrent = s.id === id;
+                                  const isCompleted = s.completed;
+                                  // Sequential logic: Unlocked if it's the first subtopic or the previous one is completed
+                                  const prevCompleted = si === 0 || t.subtopics[si - 1].completed;
+                                  const isLocked = (!t.unlocked || !prevCompleted) && user?.role === 'student';
+                                  
+                                  const content = (
+                                    <Link
+                                      key={s.id}
+                                      to={isLocked ? '#' : `/subtopic/${s.id}`}
+                                      onClick={(e) => {
+                                        if (isLocked) {
+                                          e.preventDefault();
+                                          return;
+                                        }
+                                        setIsSyllabusOpen(false);
+                                      }}
+                                      className={`flex items-center justify-between p-2 rounded-sm border transition-all ${isCurrent ? 'bg-[#194BFB]/5 border-[#194BFB] ring-1 ring-[#194BFB]/10' : (isLocked ? 'bg-slate-50 border-slate-100 opacity-60 cursor-not-allowed' : 'bg-white border-slate-200 hover:border-[#194BFB] hover:shadow-sm')}`}
+                                    >
+                                      <div className="flex items-center gap-3 min-w-0">
+                                        <div className={`h-4 w-4 rounded-full flex items-center justify-center shrink-0 border ${isCompleted ? 'bg-emerald-500 border-emerald-500 text-white' : 'bg-white border-slate-200'}`}>
+                                          {isCompleted ? <Check className="h-2 w-2 stroke-[3]" /> : (isLocked ? <Lock className="h-2 w-2 text-slate-400" /> : <div className="h-1 w-1 rounded-full bg-slate-200" />)}
+                                        </div>
+                                        <span className={`text-[13px] font-bold truncate ${isCurrent ? 'text-[#194BFB]' : (isLocked ? 'text-slate-400' : 'text-slate-600')}`}>{s.title}</span>
+                                      </div>
+                                      {isCurrent && <div className="h-1.5 w-1.5 rounded-full bg-[#194BFB] animate-pulse" />}
+                                    </Link>
+                                  );
+
+                                  return isLocked ? (
+                                    <TooltipProvider key={s.id}>
+                                      <Tooltip>
+                                        <TooltipTrigger asChild>
+                                          <div className="cursor-not-allowed">
+                                            {content}
+                                          </div>
+                                        </TooltipTrigger>
+                                        <TooltipContent side="right" className="bg-red-500 text-white border-none rounded-sm text-[10px] font-bold p-3 shadow-xl flex items-center gap-2 animate-in zoom-in-95">
+                                          <Lock className="h-3 w-3" />
+                                          Complete "{si > 0 ? t.subtopics[si-1].title : 'previous topic'}" to unlock
+                                        </TooltipContent>
+                                      </Tooltip>
+                                    </TooltipProvider>
+                                  ) : content;
+                                })}
                               </div>
-                              {isCurrent && <div className="h-1.5 w-1.5 rounded-full bg-[#194BFB] animate-pulse" />}
-                            </Link>
-                          );
-                        })}
+                          </div>
+                        ))}
                       </div>
                     </div>
                   ))}
@@ -364,15 +423,16 @@ export default function LessonView() {
           items={[
             { label: course?.title, to: `/course/${course?.id}` },
             { label: module?.title },
-            { label: lesson?.title }
+            { label: topic?.title },
+            { label: subtopic?.title }
           ]}
         />
 
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
-            <div className="bg-blue-50 text-[#194BFB] px-3 py-1 rounded-sm text-[10px] font-bold uppercase tracking-wider flex items-center gap-2 border border-blue-100">
-              <BookOpen className="h-3 w-3" />
-              {mode === 'task' ? 'Homework' : 'Lesson'}
+            <div className={`px-3 py-1 rounded-sm text-[10px] font-bold uppercase tracking-wider flex items-center gap-2 border ${mode === 'task' ? 'bg-red-50 text-red-600 border-red-100' : 'bg-blue-50 text-[#194BFB] border-blue-100'}`}>
+              {mode === 'task' ? <ClipboardCheck className="h-3 w-3" /> : <BookOpen className="h-3 w-3" />}
+              {mode === 'task' ? 'Homework' : 'Subtopic'}
             </div>
             {submission?.status === 'approved' && (
               <div className="bg-emerald-100 text-emerald-700 px-3 py-1 rounded-sm text-[10px] font-bold uppercase tracking-wider">
@@ -381,7 +441,7 @@ export default function LessonView() {
             )}
           </div>
 
-          {lesson.video_url && (
+          {subtopic.video_url && (
             <Dialog>
               <DialogTrigger asChild>
                 <Button size="sm" className="bg-[#194BFB] hover:bg-[#0F3AE5] text-white rounded-sm h-8 px-3 font-bold text-[10px] uppercase tracking-widest gap-2 shrink-0">
@@ -395,13 +455,13 @@ export default function LessonView() {
                 <DialogHeader className="p-4 bg-white border-b border-border text-left">
                   <DialogTitle className="text-sm font-bold flex items-center gap-2 uppercase tracking-wider">
                     <Video className="h-4 w-4 text-[#194BFB]" />
-                    Session Recording — {lesson.title}
+                    Session Recording — {subtopic.title}
                   </DialogTitle>
                 </DialogHeader>
                 <div className="aspect-video w-full">
                   <iframe
-                    src={getEmbedUrl(lesson.video_url)}
-                    title={lesson.title}
+                    src={getEmbedUrl(subtopic.video_url)}
+                    title={subtopic.title}
                     className="w-full h-full"
                     allow="autoplay; encrypted-media; picture-in-picture"
                     allowFullScreen
@@ -412,7 +472,7 @@ export default function LessonView() {
           )}
         </div>
         <h1 className="text-3xl font-extrabold tracking-tight text-[#0A0A0A] font-['Outfit'] mb-4">
-          {lesson.title}
+          {subtopic.title}
         </h1>
 
         {/* Completion Banner */}
@@ -420,7 +480,7 @@ export default function LessonView() {
           <div className="bg-green-50 border border-green-200 rounded-sm p-3 mb-6 flex items-center gap-2">
             <CheckCircle className="text-green-500 h-4 w-4 shrink-0" />
             <span className="text-sm text-green-700">
-              You completed this lesson{completedAt ? ` on ${new Date(completedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}` : ""}
+              You completed this subtopic{completedAt ? ` on ${new Date(completedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}` : ""}
             </span>
             <button
               onClick={handleUndoComplete}
@@ -438,19 +498,38 @@ export default function LessonView() {
         ) : (
           /* Task Mode */
           task && (
-            <div className="border border-border rounded-sm overflow-hidden bg-white shadow-sm max-w-4xl mx-auto w-full">
-              <div className="bg-[#F8FAFC] border-b border-border p-5 flex items-center justify-between">
-                <div>
-                  <div className="text-[10px] uppercase font-bold text-slate-400 tracking-[0.2em] mb-1">Task</div>
-                  <h3 className="font-['Outfit'] font-extrabold text-xl text-[#0A0A0A]">{task.description}</h3>
+            <div className="max-w-3xl mx-auto w-full animate-in fade-in zoom-in-95 duration-500">
+              <div className="bg-white border border-slate-200 rounded-sm overflow-hidden shadow-xl shadow-slate-100/50">
+                {/* Header */}
+                <div className="bg-slate-900 p-8 text-white relative overflow-hidden">
+                  <div className="relative z-10">
+                    <div className="text-[10px] uppercase font-bold text-slate-400 tracking-[0.3em] mb-2 flex items-center gap-2">
+                      <div className="h-1 w-8 bg-red-500" />
+                      Assigned Homework
+                    </div>
+                    <h3 className="font-['Outfit'] font-extrabold text-2xl tracking-tight leading-tight">{task.description}</h3>
+                  </div>
+                  <div className="absolute top-0 right-0 p-8 opacity-10">
+                    <ClipboardCheck className="h-24 w-24 -rotate-12" />
+                  </div>
                 </div>
+
+                {/* Status Bar */}
                 {submission && (
-                  <div className={`flex items-center gap-2 px-3 py-1.5 rounded-sm border ${submission.status === 'rework' ? 'border-orange-200 bg-orange-50 text-orange-600' : (submission.status === 'approved' ? 'border-emerald-200 bg-emerald-50 text-emerald-600' : 'border-amber-200 bg-amber-50 text-[#F59E0B]')} text-[10px] font-bold uppercase tracking-widest shadow-sm`}>
-                    {submission.status === 'rework' ? <RefreshCcw className="h-3 w-3" /> : (submission.status === 'approved' ? <ClipboardCheck className="h-3 w-3" /> : <Clock className="h-3 w-3" />)}
-                    {submission.status}
+                  <div className={`px-8 py-3 border-b flex items-center justify-between text-[10px] font-bold uppercase tracking-widest ${
+                    submission.status === 'rework' ? 'bg-orange-50 text-orange-600 border-orange-100' : 
+                    (submission.status === 'approved' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-amber-50 text-amber-600 border-amber-100')
+                  }`}>
+                    <div className="flex items-center gap-2">
+                      <div className={`h-1.5 w-1.5 rounded-full animate-pulse ${
+                        submission.status === 'rework' ? 'bg-orange-500' : 
+                        (submission.status === 'approved' ? 'bg-emerald-500' : 'bg-amber-500')
+                      }`} />
+                      Submission Status: {submission.status}
+                    </div>
+                    {submission.status === 'rework' ? <RefreshCcw className="h-3.5 w-3.5" /> : (submission.status === 'approved' ? <ClipboardCheck className="h-3.5 w-3.5" /> : <Clock className="h-3.5 w-3.5" />)}
                   </div>
                 )}
-              </div>
 
               <div className="p-8 space-y-10">
                 {/* Instructions */}
@@ -475,7 +554,7 @@ export default function LessonView() {
                 <div className="pt-6 border-t border-slate-100">
                   <h4 className="text-[10px] uppercase font-bold text-slate-400 tracking-widest mb-6">Your Submission</h4>
 
-                  {submission && !isEditing ? (
+                  {submission && !isEditingState ? (
                     <div className="bg-slate-50 border border-slate-200 p-6 rounded-sm space-y-4">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-4">
@@ -492,7 +571,7 @@ export default function LessonView() {
                         <div className="flex items-center gap-2">
                           {(submission.status === "pending" || submission.status === "rework") && (
                             <>
-                              <Button variant="ghost" size="sm" onClick={() => setIsEditing(true)} className="h-8 text-slate-600 hover:text-[#194BFB] hover:bg-[#194BFB]/5">
+                              <Button variant="ghost" size="sm" onClick={() => setIsEditingState(true)} className="h-8 text-slate-600 hover:text-[#194BFB] hover:bg-[#194BFB]/5">
                                 <Edit3 className="h-3.5 w-3.5 mr-2" /> Edit
                               </Button>
                               <Button variant="ghost" size="sm" onClick={handleDelete} className="h-8 text-red-500 hover:text-red-600 hover:bg-red-50">
@@ -551,8 +630,8 @@ export default function LessonView() {
                           <Button type="submit" disabled={busy} className="flex-1 rounded-sm bg-[#194BFB] hover:bg-[#0F3AE5] h-11 font-bold uppercase tracking-widest">
                             {busy ? "Submitting..." : (submission ? "Save & Resubmit" : "Submit Assignment")}
                           </Button>
-                          {isEditing && (
-                            <Button variant="ghost" onClick={() => setIsEditing(false)} className="rounded-sm h-11 font-bold text-slate-500">
+                          {isEditingState && (
+                            <Button variant="ghost" onClick={() => setIsEditingState(false)} className="rounded-sm h-11 font-bold text-slate-500">
                               Cancel
                             </Button>
                           )}
@@ -564,8 +643,9 @@ export default function LessonView() {
                 </div>
               </div>
             </div>
-          )
-        )}
+          </div>
+        )
+      )}
       </main>
 
       {/* Sticky Navigation Footer */}
@@ -573,7 +653,7 @@ export default function LessonView() {
         <div className="w-1/3">
           {mode === 'task' ? (
             <Button asChild variant="outline" className="rounded-sm border-slate-200 hover:border-[#194BFB] hover:text-[#194BFB] group transition-all h-10">
-              <Link to={`/lesson/${id}?mode=content`}>
+              <Link to={`/subtopic/${id}?mode=content`}>
                 <ChevronLeft className="h-4 w-4 mr-1 group-hover:-translate-x-1 transition-transform" />
                 <span className="hidden sm:inline">Back to Content</span>
               </Link>
@@ -583,25 +663,25 @@ export default function LessonView() {
               <ChevronLeft className="h-4 w-4 mr-1 group-hover:-translate-x-1 transition-transform" />
               Previous
             </Button>
-          ) : prev_lesson ? (
+          ) : prev_subtopic ? (
             <Button asChild variant="outline" className="rounded-sm border-slate-200 hover:border-[#194BFB] hover:text-[#194BFB] group transition-all h-10">
-              <Link to={`/lesson/${prev_lesson.id}`}>
+              <Link to={`/subtopic/${prev_subtopic.id}`}>
                 <ChevronLeft className="h-4 w-4 mr-1 group-hover:-translate-x-1 transition-transform" />
-                <span className="hidden sm:inline">Previous Lesson</span>
+                <span className="hidden sm:inline">Previous Subtopic</span>
               </Link>
             </Button>
           ) : <div />}
         </div>
 
         <div className="w-1/3 text-center">
-          {mode === 'content' && total_lessons > 0 && (
+          {mode === 'content' && (
             <span className="text-xs font-mono font-bold text-slate-400 bg-slate-50 px-3 py-1 rounded-full border border-slate-100">
               Page {currentPage + 1} / {contentBlocks.length}
             </span>
           )}
           {mode === 'task' && (
             <span className="text-xs font-mono font-bold text-slate-400 bg-slate-50 px-3 py-1 rounded-full border border-slate-100">
-              Lesson {lesson_index} / {total_lessons}
+              Subtopic {subtopic_index} / {total_subtopics}
             </span>
           )}
         </div>
@@ -615,33 +695,35 @@ export default function LessonView() {
               </Button>
             ) : (task && task.id) ? (
               <Button asChild className="bg-[#194BFB] hover:bg-[#0F3AE5] text-white rounded-sm group h-10 px-6 font-bold uppercase tracking-wider shadow-lg shadow-blue-100">
-                <Link to={`/lesson/${id}?mode=task${classId ? `&classId=${classId}` : ''}`}>
+                <Link to={`/subtopic/${id}?mode=task${classId ? `&classId=${classId}` : ''}`}>
                   Go to Task
                   <ClipboardCheck className="h-4 w-4 ml-1 group-hover:translate-x-1 transition-transform" />
                 </Link>
               </Button>
             ) : (
               <Button onClick={handleComplete} disabled={busy} className="bg-emerald-500 hover:bg-emerald-600 text-white rounded-sm h-10 px-6 font-bold uppercase tracking-wider">
-                {busy ? "..." : (next_lesson ? "Next Lesson" : "Finish Course")}
+                {busy ? "..." : (next_subtopic ? "Next Subtopic" : "Finish Course")}
               </Button>
             )
           ) : (
-            next_lesson ? (
+            next_subtopic ? (
               <TooltipProvider>
-                <Tooltip delayDuration={0}>
+                <Tooltip>
                   <TooltipTrigger asChild>
-                    <div className="inline-block">
-                      <Button asChild className={`rounded-sm h-10 px-6 font-bold uppercase tracking-wider ${(submission?.status === 'approved' || user?.role === 'mentor') ? 'bg-[#194BFB] hover:bg-[#0F3AE5] text-white shadow-lg shadow-blue-100' : 'bg-slate-100 text-slate-400 cursor-not-allowed border-slate-200 pointer-events-none'}`}>
-                        <Link to={(submission?.status === 'approved' || user?.role === 'mentor') ? `/lesson/${next_lesson.id}${classId ? `?classId=${classId}` : ''}` : '#'}>
-                          Next Lesson
-                          <ChevronRight className="h-4 w-4 ml-1" />
-                        </Link>
+                    <div className="inline-block relative">
+                      <Button
+                        onClick={() => navigate(`/subtopic/${next_subtopic.id}`)}
+                        disabled={(submission?.status !== 'approved' && user?.role !== 'mentor') || busy}
+                        className={`bg-[#194BFB] hover:bg-[#0F3AE5] text-white rounded-sm h-11 px-8 text-xs font-bold uppercase tracking-widest shadow-lg shadow-blue-100 ${((submission?.status !== 'approved' && user?.role !== 'mentor') || busy) ? 'pointer-events-none' : ''}`}
+                      >
+                        {busy ? "..." : (next_subtopic ? "Next Subtopic" : "Finish Course")} <ArrowRight className="ml-2 h-4 w-4" />
                       </Button>
                     </div>
                   </TooltipTrigger>
                   {(submission?.status !== 'approved' && user?.role !== 'mentor') && (
-                    <TooltipContent side="top" className="bg-slate-900 text-white border-none text-[10px] font-bold uppercase tracking-widest px-3 py-2">
-                      Complete & Get Approval first
+                    <TooltipContent className="bg-red-500 text-white border-none rounded-sm text-[10px] font-bold p-3 shadow-xl shadow-red-100 flex items-center gap-2 animate-in zoom-in-95">
+                      <Lock className="h-3 w-3" />
+                      Submit & get approval to unlock next subtopic
                     </TooltipContent>
                   )}
                 </Tooltip>

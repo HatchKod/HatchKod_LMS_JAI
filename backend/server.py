@@ -287,13 +287,15 @@ class LoginIn(BaseModel):
 
 
 class AdminCourseIn(BaseModel):
-    title: str
+    title: Optional[str] = None
     description: Optional[str] = None
+    short_description: Optional[str] = None
     thumbnail_url: Optional[str] = None
     course_type: Optional[str] = "live"
     flow_type: Optional[str] = "linear"
     category: Optional[str] = "Java"
     difficulty: Optional[str] = "beginner"
+    language: Optional[str] = "English"
 
 class ModuleCreateIn(BaseModel):
     title: str
@@ -317,14 +319,25 @@ class ModuleIn(BaseModel):
     sequence_order: Optional[int] = 0
 
 
-class LessonIn(BaseModel):
+class TopicIn(BaseModel):
     title: Optional[str] = None
     sequence_order: Optional[int] = 0
     content_html: Optional[str] = None
     video_url: Optional[str] = None
     github_link: Optional[str] = None
     estimated_minutes: Optional[int] = 30
-    is_published: Optional[bool] = False
+    is_published: Optional[bool] = True
+
+
+class SubtopicIn(BaseModel):
+    title: Optional[str] = None
+    sequence_order: Optional[int] = 0
+    content_html: Optional[str] = None
+    video_url: Optional[str] = None
+    github_link: Optional[str] = None
+    estimated_minutes: Optional[int] = 30
+    is_mandatory: Optional[bool] = False
+    is_published: Optional[bool] = True
 
 
 class TaskIn(BaseModel):
@@ -423,7 +436,7 @@ class LiveClassIn(BaseModel):
 
 class ScheduleSessionIn(BaseModel):
     batch_id: str
-    lesson_id: Optional[str] = None
+    topic_id: Optional[str] = None
     custom_topic: Optional[str] = None
     scheduled_at: str
     meeting_url: Optional[str] = None
@@ -455,7 +468,7 @@ class MarkReadIn(BaseModel):
     all: Optional[bool] = False
 
 
-class LessonCompleteIn(BaseModel):
+class TopicCompleteIn(BaseModel):
     time_spent_minutes: Optional[int] = 0
 
 
@@ -470,6 +483,9 @@ class MeetingUrlIn(BaseModel):
 class AttendanceOverrideIn(BaseModel):
     status: Literal["present", "absent", "late"]
     override_reason: Optional[str] = None
+
+class BulkSaveAttendanceRequest(BaseModel):
+    records: list[dict]
 
 class BatchIn(BaseModel):
     name: str
@@ -590,10 +606,11 @@ async def update_course_admin(course_id: str, payload: AdminCourseIn, user: dict
 @api.post("/admin/courses/{course_id}/publish")
 async def publish_course_admin(course_id: str, _: dict = Depends(require_roles("admin"))):
     # Validate: course must have at least 1 module with 1 lesson
-    modules = supabase.table("modules").select("id, lessons(id)").eq("course_id", course_id).execute().data
-    has_lesson = any(len(m.get("lessons") or []) > 0 for m in modules)
-    if not modules or not has_lesson:
-        raise HTTPException(400, "Cannot publish: course has no modules or lessons.")
+    # Check if course has content
+    modules = supabase.table("modules").select("id, topics(id, subtopics(id))").eq("course_id", course_id).execute().data
+    has_content = any(len(m.get("topics") or []) > 0 for m in modules)
+    if not has_content:
+        raise HTTPException(400, "Cannot publish: course has no modules or topics.")
     
     supabase.table("courses").update({"is_published": True, "status": "published"}).eq("id", course_id).execute()
     return {"ok": True}
@@ -605,23 +622,52 @@ async def unpublish_course_admin(course_id: str, _: dict = Depends(require_roles
 
 @api.delete("/admin/courses/{course_id}")
 async def delete_course_admin(course_id: str, _: dict = Depends(require_roles("admin"))):
-    course = get_single_or_none(supabase.table("courses").select("is_published").eq("id", course_id))
+    course = get_single_or_none(supabase.table("courses").select("is_published, title").eq("id", course_id))
     if not course:
         raise HTTPException(404, "Course not found")
     if course.get("is_published"):
         raise HTTPException(400, "Unpublish the course before deleting.")
 
-    # Cascading delete: tasks -> lessons -> modules -> courses
-    modules = supabase.table("modules").select("id").eq("course_id", course_id).execute().data or []
-    for m in modules:
-        lessons = supabase.table("lessons").select("id").eq("module_id", m["id"]).execute().data or []
-        for l in lessons:
-            supabase.table("tasks").delete().eq("lesson_id", l["id"]).execute()
-            supabase.table("lessons").delete().eq("id", l["id"]).execute()
-        supabase.table("modules").delete().eq("id", m["id"]).execute()
-    
-    supabase.table("courses").delete().eq("id", course_id).execute()
-    return {"ok": True}
+    # 1. Check for associated batches to prevent breaking live environments
+    batches = supabase.table("batches").select("id, name").eq("course_id", course_id).execute().data or []
+    if batches:
+        batch_names = ", ".join([b["name"] for b in batches])
+        raise HTTPException(400, f"Cannot delete course '{course['title']}' because it has active batches ({batch_names}). Please delete these batches first.")
+
+    try:
+        # 2. Cascading delete: submissions -> progress -> completions -> tasks -> subtopics -> topics -> modules -> courses
+        modules = supabase.table("modules").select("id").eq("course_id", course_id).execute().data or []
+        for m in modules:
+            topics = supabase.table("topics").select("id").eq("module_id", m["id"]).execute().data or []
+            for t in topics:
+                subtopics = supabase.table("subtopics").select("id").eq("topic_id", t["id"]).execute().data or []
+                for s in subtopics:
+                    # Get tasks for this subtopic to delete their submissions
+                    tasks = supabase.table("tasks").select("id").eq("subtopic_id", s["id"]).execute().data or []
+                    task_ids = [tk["id"] for tk in tasks]
+                    
+                    if task_ids:
+                        # Delete student submissions for these tasks
+                        supabase.table("submissions").delete().in_("task_id", task_ids).execute()
+                        # Delete the tasks
+                        supabase.table("tasks").delete().in_("id", task_ids).execute()
+                    
+                    # Delete subtopic completions, progress, and submissions for this subtopic
+                    supabase.table("submissions").delete().eq("subtopic_id", s["id"]).execute()
+                    supabase.table("subtopic_completions").delete().eq("subtopic_id", s["id"]).execute()
+                    supabase.table("student_progress").delete().eq("subtopic_id", s["id"]).execute()
+                    
+                    # Delete the subtopic itself
+                    supabase.table("subtopics").delete().eq("id", s["id"]).execute()
+                    
+                supabase.table("topics").delete().eq("id", t["id"]).execute()
+            supabase.table("modules").delete().eq("id", m["id"]).execute()
+        
+        supabase.table("courses").delete().eq("id", course_id).execute()
+        return {"ok": True}
+    except Exception as e:
+        logger.error(f"Failed to delete course: {e}")
+        raise HTTPException(400, f"Cannot delete this course due to database constraints: {str(e)}")
 
 # --- Module Endpoints (Admin) ---
 
@@ -647,7 +693,7 @@ async def update_module_admin(module_id: str, payload: ModuleIn, _: dict = Depen
 
 @api.delete("/admin/modules/{module_id}")
 async def delete_module_admin(module_id: str, _: dict = Depends(require_roles("admin"))):
-    lessons = supabase.table("lessons").select("id").eq("module_id", module_id).execute().data
+    lessons = supabase.table("topics").select("id").eq("module_id", module_id).execute().data
     if lessons:
         raise HTTPException(400, "Delete all lessons in this module first.")
     supabase.table("modules").delete().eq("id", module_id).execute()
@@ -661,8 +707,8 @@ async def reorder_modules_admin(payload: ReorderModulesIn, _: dict = Depends(req
 
 # --- Lesson Endpoints (Admin) ---
 
-@api.post("/admin/modules/{module_id}/lessons")
-async def create_lesson_admin(module_id: str, payload: LessonIn, _: dict = Depends(require_roles("admin"))):
+@api.post("/admin/modules/{module_id}/topics")
+async def create_topic_admin(module_id: str, payload: TopicIn, _: dict = Depends(require_roles("admin"))):
     lid = str(uuid.uuid4())
     doc = {
         "id": lid,
@@ -676,34 +722,71 @@ async def create_lesson_admin(module_id: str, payload: LessonIn, _: dict = Depen
         "is_mandatory": True,
         "created_at": iso(now_utc())
     }
-    supabase.table("lessons").insert(doc).execute()
+    supabase.table("topics").insert(doc).execute()
     return doc
 
-@api.put("/admin/lessons/{lesson_id}")
-async def update_lesson_admin(lesson_id: str, payload: LessonIn, _: dict = Depends(require_roles("admin"))):
+@api.put("/admin/topics/{topic_id}")
+async def update_topic_admin(topic_id: str, payload: TopicIn, _: dict = Depends(require_roles("admin"))):
     update_data = {k: v for k, v in payload.dict(exclude_unset=True).items()}
     if update_data:
-        supabase.table("lessons").update(update_data).eq("id", lesson_id).execute()
+        supabase.table("topics").update(update_data).eq("id", topic_id).execute()
     return {"ok": True}
 
-@api.delete("/admin/lessons/{lesson_id}")
-async def delete_lesson_admin(lesson_id: str, _: dict = Depends(require_roles("admin"))):
-    supabase.table("tasks").delete().eq("lesson_id", lesson_id).execute()
-    supabase.table("lessons").delete().eq("id", lesson_id).execute()
+@api.delete("/admin/topics/{topic_id}")
+async def delete_topic_admin(topic_id: str, _: dict = Depends(require_roles("admin"))):
+    supabase.table("tasks").delete().eq("topic_id", topic_id).execute()
+    supabase.table("topics").delete().eq("id", topic_id).execute()
     return {"ok": True}
 
-@api.post("/admin/lessons/reorder")
+@api.post("/admin/topics/{topic_id}/subtopics")
+async def create_subtopic_admin(topic_id: str, payload: SubtopicIn, _: dict = Depends(require_roles("admin"))):
+    sid = str(uuid.uuid4())
+    doc = {
+        "id": sid,
+        "topic_id": topic_id,
+        "title": payload.title,
+        "content_html": payload.content_html,
+        "video_url": payload.video_url,
+        "github_link": payload.github_link,
+        "estimated_minutes": payload.estimated_minutes,
+        "sequence_order": payload.sequence_order,
+        "is_mandatory": True,
+        "created_at": iso(now_utc())
+    }
+    supabase.table("subtopics").insert(doc).execute()
+    return doc
+
+@api.put("/admin/subtopics/{subtopic_id}")
+async def update_subtopic_admin(subtopic_id: str, payload: SubtopicIn, _: dict = Depends(require_roles("admin"))):
+    update_data = {k: v for k, v in payload.dict(exclude_unset=True).items()}
+    if update_data:
+        supabase.table("subtopics").update(update_data).eq("id", subtopic_id).execute()
+    return {"ok": True}
+
+@api.delete("/admin/subtopics/{subtopic_id}")
+async def delete_subtopic_admin(subtopic_id: str, _: dict = Depends(require_roles("admin"))):
+    supabase.table("tasks").delete().eq("subtopic_id", subtopic_id).execute()
+    supabase.table("subtopics").delete().eq("id", subtopic_id).execute()
+    return {"ok": True}
+
+@api.post("/admin/topics/reorder")
 async def reorder_lessons_admin(payload: ReorderModulesIn, _: dict = Depends(require_roles("admin"))):
     for i, lid in enumerate(payload.ordered_ids):
-        supabase.table("lessons").update({"sequence_order": i}).eq("id", lid).execute()
+        supabase.table("topics").update({"sequence_order": i}).eq("id", lid).execute()
     return {"ok": True}
 
-@api.post("/admin/lessons/{lesson_id}/task")
-async def upsert_task_admin(lesson_id: str, payload: TaskIn, _: dict = Depends(require_roles("admin"))):
+@api.post("/admin/subtopics/reorder")
+async def reorder_subtopics_admin(payload: ReorderModulesIn, _: dict = Depends(require_roles("admin"))):
+    for i, sid in enumerate(payload.ordered_ids):
+        supabase.table("subtopics").update({"sequence_order": i}).eq("id", sid).execute()
+    return {"ok": True}
+
+@api.post("/admin/subtopics/{subtopic_id}/task")
+async def upsert_task_admin(subtopic_id: str, payload: TaskIn, _: dict = Depends(require_roles("admin"))):
     # Check if task exists
-    existing = get_single_or_none(supabase.table("tasks").select("id").eq("lesson_id", lesson_id))
+    existing = get_single_or_none(supabase.table("tasks").select("id").eq("subtopic_id", subtopic_id))
     doc = {
-        "lesson_id": lesson_id,
+        "subtopic_id": subtopic_id,
         "description": payload.description,
         "instructions": payload.instructions,
         "expected_output": payload.expected_output,
@@ -718,7 +801,7 @@ async def upsert_task_admin(lesson_id: str, payload: TaskIn, _: dict = Depends(r
         supabase.table("tasks").insert(doc).execute()
     
     # Return full task
-    return get_single_or_none(supabase.table("tasks").select("*").eq("lesson_id", lesson_id))
+    return get_single_or_none(supabase.table("tasks").select("*").eq("subtopic_id", subtopic_id))
 
 @api.get("/courses/{course_id}/full")
 async def get_course_full(course_id: str, _: dict = Depends(require_roles("admin", "mentor"))):
@@ -727,41 +810,28 @@ async def get_course_full(course_id: str, _: dict = Depends(require_roles("admin
     if not course:
         raise HTTPException(404, "Course not found")
         
-    # Fetch modules with lessons in a nested query
+    # Fetch modules with topics and subtopics in a nested query
     modules = supabase.table("modules")\
-        .select("*, lessons(*)")\
+        .select("*, topics(*, subtopics(*))")\
         .eq("course_id", course_id)\
         .order("sequence_order")\
         .execute().data
         
-    # Deduplicate modules by title
-    unique_modules = []
-    seen_titles = set()
+    # Deduplicate and sort
     for m in modules:
-        title = m.get("title", "").strip()
-        if title not in seen_titles:
-            seen_titles.add(title)
-            unique_modules.append(m)
-            
-    # Sort lessons within each module by sequence_order
-    for m in unique_modules:
-        if m.get("lessons"):
-            # Deduplicate lessons within module by title too
-            unique_lessons = []
-            seen_lesson_titles = set()
-            for l in m["lessons"]:
-                l_title = l.get("title", "").strip()
-                if l_title not in seen_lesson_titles:
-                    seen_lesson_titles.add(l_title)
-                    unique_lessons.append(l)
-            unique_lessons.sort(key=lambda l: l.get("sequence_order") or 0)
-            m["lessons"] = unique_lessons
+        if m.get("topics"):
+            m["topics"].sort(key=lambda t: t.get("sequence_order") or 0)
+            for t in m["topics"]:
+                if t.get("subtopics"):
+                    t["subtopics"].sort(key=lambda s: s.get("sequence_order") or 0)
+                else:
+                    t["subtopics"] = []
         else:
-            m["lessons"] = []
+            m["topics"] = []
             
     return {
         "course": course,
-        "modules": unique_modules
+        "modules": modules
     }
 
 
@@ -770,102 +840,110 @@ async def get_course_full(course_id: str, _: dict = Depends(require_roles("admin
 
 
 # -------------------- Lessons --------------------
-@api.get("/modules/{module_id}/lessons")
-async def get_module_lessons(module_id: str, _: dict = Depends(require_roles("admin", "mentor"))):
-    lessons = supabase.table("lessons").select("*, tasks(id)").eq("module_id", module_id).order("sequence_order").execute().data
-    for l in lessons:
-        l["has_task"] = len(l.get("tasks") or []) > 0
-    return lessons
+@api.get("/modules/{module_id}/topics")
+async def get_module_topics(module_id: str, _: dict = Depends(require_roles("admin", "mentor"))):
+    topics = supabase.table("topics").select("*, subtopics(id)").eq("module_id", module_id).order("sequence_order").execute().data
+    for t in topics:
+        t["has_subtopics"] = len(t.get("subtopics") or []) > 0
+    return topics
 
 
 
-@api.get("/lessons/{lesson_id}")
-async def get_lesson(lesson_id: str, user: dict = Depends(get_current_user)):
-    # Fetch lesson with basic context
-    lesson_res = supabase.table("lessons").select("*, tasks(*), modules(*, courses(*))").eq("id", lesson_id).single().execute()
-    if not lesson_res.data:
-        raise HTTPException(404, "Lesson not found")
-    lesson = lesson_res.data
+@api.get("/subtopics/{subtopic_id}")
+async def get_subtopic(subtopic_id: str, user: dict = Depends(get_current_user)):
+    # Fetch subtopic with basic context
+    # Faster fetching: Get subtopic and its direct parent info
+    subtopic_res = supabase.table("subtopics").select("*, tasks(*), topics(id, title, module_id)").eq("id", subtopic_id).single().execute()
+    if not subtopic_res.data:
+        raise HTTPException(404, "Subtopic not found")
+    subtopic = subtopic_res.data
+    topic_raw = subtopic.pop("topics", {}) or {}
     
-    # Extract basic context
-    module_raw = lesson.pop("modules") if lesson.get("modules") else {}
-    course_raw = module_raw.pop("courses") if module_raw.get("courses") else {}
-    course_id = module_raw.get("course_id")
+    # Get basic course context safely
+    module_id = topic_raw.get("module_id")
+    module_raw = {}
+    course_id = None
     
-    # Fetch FULL course structure for the sidebar syllabus
+    if module_id:
+        module_res = supabase.table("modules").select("id, title, course_id").eq("id", module_id).single().execute()
+        module_raw = module_res.data or {}
+        course_id = module_raw.get("course_id")
+    
+    # Safely fetch course structure
     course_data = {}
     if course_id:
-        # Use our optimized get_course logic
         course_data = await get_course(course_id, user)
-    else:
-        course_data = course_raw # Fallback to basic course info
-
-    task = lesson["tasks"][0] if lesson.get("tasks") else None
     
-    # For student: check unlock and submission
+    task = subtopic["tasks"][0] if subtopic.get("tasks") and len(subtopic["tasks"]) > 0 else None
     submission = None
-    if user["role"] == "student":
-        unlocked = await is_lesson_unlocked(user["id"], lesson_id)
+    
+    if user["role"] == "student" and topic_raw.get("id"):
+        # Check unlock status directly
+        unlocked = await is_topic_unlocked(user["id"], topic_raw["id"])
         if not unlocked:
-            raise HTTPException(status_code=403, detail="Lesson is locked. Complete previous tasks first.")
+            raise HTTPException(status_code=403, detail="Topic is locked. Complete previous topics first.")
             
         if task:
             sub_res = supabase.table("submissions").select("*").eq("task_id", task["id"]).eq("student_id", user["id"]).order("submitted_at", desc=True).limit(1).execute()
             submission = sub_res.data[0] if sub_res.data else None
 
-    # Navigation Context: Find prev/next lessons in the same course
-    if not course_id:
-        return {
-            "lesson": lesson, "course": course_data, "module": module_raw,
-            "task": task, "submission": submission,
-            "prev_lesson": None, "next_lesson": None,
-            "lesson_index": 0, "total_lessons": 1
-        }
-
-    ordered = await get_ordered_lessons(course_id)
-    idx = next((i for i, l in enumerate(ordered) if l["id"] == lesson_id), -1)
+    # Calculate next/prev and index
+    all_subtopics = []
+    if course_data and course_data.get("modules"):
+        for m in course_data["modules"]:
+            for t in m.get("topics", []):
+                for s in t.get("subtopics", []):
+                    all_subtopics.append(s)
     
-    prev_lesson = ordered[idx - 1] if idx > 0 else None
-    next_lesson = ordered[idx + 1] if idx < len(ordered) - 1 else None
+    subtopic_index = -1
+    next_sub = None
+    prev_sub = None
+    for i, s in enumerate(all_subtopics):
+        if s["id"] == subtopic_id:
+            subtopic_index = i + 1
+            if i > 0: prev_sub = all_subtopics[i-1]
+            if i < len(all_subtopics) - 1: next_sub = all_subtopics[i+1]
+            break
 
     return {
-        "lesson": lesson,
+        "subtopic": subtopic,
         "course": course_data,
         "module": module_raw,
+        "topic": topic_raw,
         "task": task,
         "submission": submission,
-        "prev_lesson": prev_lesson,
-        "next_lesson": next_lesson,
-        "lesson_index": idx + 1 if idx != -1 else 1,
-        "total_lessons": len(ordered)
+        "next_subtopic": next_sub,
+        "prev_subtopic": prev_sub,
+        "total_subtopics": len(all_subtopics),
+        "subtopic_index": subtopic_index
     }
 
 # -------------------- Tasks --------------------
-@api.post("/lessons/{lesson_id}/task")
-async def upsert_task(lesson_id: str, payload: TaskIn, _: dict = Depends(require_roles("admin", "mentor"))):
-    existing = supabase.table("tasks").select("id").eq("lesson_id", lesson_id).execute().data
+@api.post("/subtopics/{subtopic_id}/task")
+async def upsert_task(subtopic_id: str, payload: TaskIn, _: dict = Depends(require_roles("admin", "mentor"))):
+    existing = supabase.table("tasks").select("id").eq("subtopic_id", subtopic_id).execute().data
     doc = {
-        "lesson_id": lesson_id,
+        "subtopic_id": subtopic_id,
         "description": payload.description,
         "instructions": payload.instructions,
         "expected_output": payload.expected_output,
         "difficulty": payload.difficulty
     }
     if existing:
-        res = supabase.table("tasks").update(doc).eq("lesson_id", lesson_id).execute().data
+        res = supabase.table("tasks").update(doc).eq("subtopic_id", subtopic_id).execute().data
     else:
         doc["id"] = str(uuid.uuid4())
         doc["created_at"] = iso(now_utc())
         res = supabase.table("tasks").insert(doc).execute().data
     return res[0] if res else doc
 
-@api.delete("/lessons/{lesson_id}/task")
-async def delete_task(lesson_id: str, _: dict = Depends(require_roles("admin"))):
-    supabase.table("tasks").delete().eq("lesson_id", lesson_id).execute()
+@api.delete("/subtopics/{subtopic_id}/task")
+async def delete_task(subtopic_id: str, _: dict = Depends(require_roles("admin"))):
+    supabase.table("tasks").delete().eq("subtopic_id", subtopic_id).execute()
     return {"ok": True}
 
 # -------------------- Lock/Unlock helper --------------------
-async def get_ordered_lessons(course_id: str) -> list:
+async def get_ordered_topics(course_id: str) -> list:
     modules_all = supabase.table("modules").select("*").eq("course_id", course_id).order("sequence_order").execute().data
     
     # Deduplicate modules by title
@@ -885,7 +963,7 @@ async def get_ordered_lessons(course_id: str) -> list:
     if not all_module_ids:
         return []
         
-    all_lessons_raw = supabase.table("lessons").select("*").in_("module_id", all_module_ids).order("sequence_order").execute().data
+    all_lessons_raw = supabase.table("topics").select("*").in_("module_id", all_module_ids).order("sequence_order").execute().data
     
     # Group and deduplicate lessons by title per canonical module
     title_to_canonical_id = {m.get("title","").strip(): m["id"] for m in mods_by_title.values()}
@@ -916,32 +994,47 @@ async def get_ordered_lessons(course_id: str) -> list:
     return ordered
 
 
-async def is_lesson_unlocked(student_id: str, lesson_id: str) -> bool:
-    """Lesson N+1 unlocks only when Lesson N's task is approved."""
-    lesson = get_single_or_none(supabase.table("lessons").select("*").eq("id", lesson_id))
-    if not lesson:
+async def is_topic_unlocked(student_id: str, topic_id: str) -> bool:
+    """Topic N+1 unlocks only when Topic N is complete."""
+    topic = get_single_or_none(supabase.table("topics").select("*").eq("id", topic_id))
+    if not topic:
         return False
-    module = get_single_or_none(supabase.table("modules").select("*").eq("id", lesson["module_id"]))
+    module = get_single_or_none(supabase.table("modules").select("*").eq("id", topic["module_id"]))
     if not module:
         return False
-    ordered = await get_ordered_lessons(module["course_id"])
-    idx = next((i for i, l in enumerate(ordered) if l["id"] == lesson_id), -1)
+    ordered = await get_ordered_topics(module["course_id"])
+    idx = next((i for i, t in enumerate(ordered) if t["id"] == topic_id), -1)
     if idx <= 0:
         return True
-    prev = ordered[idx - 1]
     
-    # Check if previously completed in student_progress (covers both tasks and content)
-    progress = get_single_or_none(supabase.table("student_progress").select("*").eq("student_id", student_id).eq("lesson_id", prev["id"]).eq("is_completed", True))
-    if progress:
-        return True
+    prev_topic = ordered[idx - 1]
+    
+    # Check if prev_topic is complete
+    # A Topic is complete if all its mandatory subtopics are finished in student_progress
+    mandatory_subtopics = supabase.table("subtopics")\
+        .select("id")\
+        .eq("topic_id", prev_topic["id"])\
+        .eq("is_mandatory", True)\
+        .execute().data or []
+    
+    if not mandatory_subtopics:
+        # Fallback: if no mandatory subtopics, check if Topic was marked complete manually (legacy)
+        legacy_progress = get_single_or_none(supabase.table("student_progress").select("*").eq("student_id", student_id).eq("topic_id", prev_topic["id"]).eq("is_completed", True))
+        return legacy_progress is not None
 
-    # Fallback: check if previous lesson has a task. If it doesn't, it should be unlocked.
-    # (Though it should have been caught by the progress check if they clicked 'Finish')
-    prev_task = get_single_or_none(supabase.table("tasks").select("id").eq("lesson_id", prev["id"]))
-    if not prev_task:
-        return True
-        
-    return False
+    mandatory_ids = [s["id"] for s in mandatory_subtopics]
+    
+    # Check progress for these mandatory IDs
+    completed_subtopics = supabase.table("student_progress")\
+        .select("subtopic_id")\
+        .eq("student_id", student_id)\
+        .in_("subtopic_id", mandatory_ids)\
+        .eq("is_completed", True)\
+        .execute().data or []
+    
+    completed_ids = {c["subtopic_id"] for c in completed_subtopics}
+    
+    return all(mid in completed_ids for mid in mandatory_ids)
 
 
 # -------------------- Submissions --------------------
@@ -971,13 +1064,17 @@ async def upload_submission_file(file: UploadFile = File(...), user: dict = Depe
         raise HTTPException(status_code=500, detail=f"Failed to upload file to storage: {str(e)}")
 
 
-@api.post("/lessons/{lesson_id}/submit")
-async def submit_task(lesson_id: str, payload: SubmissionIn, user: dict = Depends(require_roles("student"))):
-    task = get_single_or_none(supabase.table("tasks").select("*").eq("lesson_id", lesson_id))
+@api.post("/subtopics/{subtopic_id}/submit")
+async def submit_task(subtopic_id: str, payload: SubmissionIn, user: dict = Depends(require_roles("student"))):
+    task = get_single_or_none(supabase.table("tasks").select("*").eq("subtopic_id", subtopic_id))
     if not task:
-        raise HTTPException(404, "No task for this lesson")
-    if not await is_lesson_unlocked(user["id"], lesson_id):
-        raise HTTPException(403, "Lesson locked")
+        raise HTTPException(404, "No task for this subtopic")
+    
+    # Check if subtopic is unlocked (using parent topic check)
+    sub_res = supabase.table("subtopics").select("topic_id").eq("id", subtopic_id).single().execute()
+    if not sub_res.data: raise HTTPException(404, "Subtopic not found")
+    if not await is_topic_unlocked(user["id"], sub_res.data["topic_id"]):
+        raise HTTPException(403, "Subtopic locked")
     if not (payload.submission_url or payload.submission_text):
         raise HTTPException(400, "Provide GitHub link or text")
 
@@ -989,8 +1086,18 @@ async def submit_task(lesson_id: str, payload: SubmissionIn, user: dict = Depend
         if not (is_github or is_storage):
             raise HTTPException(400, "Invalid submission format. Provide a GitHub URL or upload a file.")
 
+    # Resolve mentor via student's active batch enrollment
+    mentor_id = None
+    try:
+        enroll_res = supabase.table("batch_students").select("batches(mentor_id)").eq("student_id", user["id"]).execute()
+        mentor_ids = [e["batches"]["mentor_id"] for e in enroll_res.data if e.get("batches") and e["batches"].get("mentor_id")] if enroll_res.data else []
+        if mentor_ids:
+            mentor_id = mentor_ids[0]
+    except Exception as e:
+        logger.error(f"Error resolving mentor in submit_task: {e}")
+
     # If a previous submission is in 'rework' or 'pending', overwrite it; else create new
-    existing = supabase.table("submissions").select("*").eq("student_id", user["id"]).eq("lesson_id", lesson_id).order("submitted_at", desc=True).limit(1).execute().data
+    existing = supabase.table("submissions").select("*").eq("student_id", user["id"]).eq("subtopic_id", subtopic_id).order("submitted_at", desc=True).limit(1).execute().data
     if existing and existing[0].get("status") in ("rework", "pending"):
         supabase.table("submissions").update({
             "submission_url": payload.submission_url or "",
@@ -999,6 +1106,7 @@ async def submit_task(lesson_id: str, payload: SubmissionIn, user: dict = Depend
             "feedback": "",
             "submitted_at": iso(now_utc()),
             "reviewed_at": None,
+            "mentor_id": mentor_id or existing[0].get("mentor_id"),
         }).eq("id", existing[0]["id"]).execute()
         return get_single_or_none(supabase.table("submissions").select("*").eq("id", existing[0]["id"]))
 
@@ -1006,9 +1114,9 @@ async def submit_task(lesson_id: str, payload: SubmissionIn, user: dict = Depend
     doc = {
         "id": sid,
         "task_id": task["id"],
-        "lesson_id": lesson_id,
+        "subtopic_id": subtopic_id,
         "student_id": user["id"],
-        "mentor_id": user.get("assigned_mentor_id"),
+        "mentor_id": mentor_id,
         "submission_url": payload.submission_url or "",
         "submission_text": payload.submission_text or "",
         "status": "pending",
@@ -1018,6 +1126,54 @@ async def submit_task(lesson_id: str, payload: SubmissionIn, user: dict = Depend
     }
     supabase.table("submissions").insert(doc).execute()
     return doc
+
+
+@api.post("/subtopics/{subtopic_id}/complete")
+async def complete_subtopic(subtopic_id: str, payload: TopicCompleteIn, user: dict = Depends(require_roles("student"))):
+    subtopic = get_single_or_none(supabase.table("subtopics").select("*").eq("id", subtopic_id))
+    if not subtopic:
+        raise HTTPException(404, "Subtopic not found")
+
+    # If it's a task subtopic, it cannot be manually completed
+    has_task = get_single_or_none(supabase.table("tasks").select("id").eq("subtopic_id", subtopic_id))
+    if has_task:
+        raise HTTPException(400, "Subtopics with tasks must be approved by a mentor.")
+
+    # Record completion
+    supabase.table("student_progress").upsert({
+        "student_id": user["id"],
+        "subtopic_id": subtopic_id,
+        "is_completed": True,
+        "completed_at": iso(now_utc()),
+    }).execute()
+
+    # Record time spent (legacy/analytics)
+    supabase.table("subtopic_completions").upsert({
+        "student_id": user["id"],
+        "subtopic_id": subtopic_id,
+        "time_spent_minutes": payload.time_spent_minutes,
+        "completed_at": iso(now_utc())
+    }).execute()
+    
+    # Award XP
+    try:
+        xp_data = award_xp(user["id"], "lesson_completed")
+        return {"ok": True, "gamification": xp_data}
+    except Exception as e:
+        logger.error(f"Error awarding XP: {e}")
+        return {"ok": True}
+
+
+@api.delete("/subtopics/{subtopic_id}/complete")
+async def undo_complete_subtopic(subtopic_id: str, user: dict = Depends(require_roles("student"))):
+    # Only allow undoing if no approved submission exists
+    approved = get_single_or_none(supabase.table("submissions").select("id").eq("student_id", user["id"]).eq("subtopic_id", subtopic_id).eq("status", "approved"))
+    if approved:
+        raise HTTPException(400, "Cannot undo completion for an approved task.")
+        
+    supabase.table("student_progress").delete().eq("student_id", user["id"]).eq("subtopic_id", subtopic_id).execute()
+    supabase.table("subtopic_completions").delete().eq("student_id", user["id"]).eq("subtopic_id", subtopic_id).execute()
+    return {"ok": True}
 
 
 @api.delete("/submissions/{submission_id}")
@@ -1035,27 +1191,58 @@ async def delete_submission(submission_id: str, user: dict = Depends(require_rol
 
 @api.get("/submissions/pending")
 async def pending_submissions(user: dict = Depends(require_roles("mentor", "admin"))):
-    query = supabase.table("submissions").select("*").in_("status", ["pending", "rework"])
-    if user["role"] == "mentor":
-        # Show submissions from students assigned to this mentor + unassigned
-        query = query.or_("mentor_id.eq." + user["id"] + ",mentor_id.is.null")
-    subs = query.order("submitted_at", desc=True).execute().data
-    if not subs:
-        return subs
-    # Batch-fetch students and lessons
-    student_ids = list({s["student_id"] for s in subs})
-    lesson_ids = list({s["lesson_id"] for s in subs})
-    
-    students = supabase.table("users").select("*").in_("id", student_ids).execute().data if student_ids else []
-    student_map = {st["id"]: st for st in students}
-    
-    lessons = supabase.table("lessons").select("*").in_("id", lesson_ids).execute().data if lesson_ids else []
-    lesson_map = {l["id"]: l for l in lessons}
-    for s in subs:
-        s["student"] = student_map.get(s["student_id"])
-        s["lesson"] = lesson_map.get(s["lesson_id"])
-    return subs
+    try:
+        # 1. Get the list of students this mentor should see
+        student_ids = []
+        if user["role"] == "mentor":
+            # From Batches
+            b_res = supabase.table("batches").select("id").eq("mentor_id", user["id"]).execute()
+            b_ids = [b["id"] for b in b_res.data] if b_res.data else []
+            if b_ids:
+                bs_res = supabase.table("batch_students").select("student_id").in_("batch_id", b_ids).execute()
+                student_ids.extend([item["student_id"] for item in bs_res.data] if bs_res.data else [])
+            
+            student_ids = list(set(student_ids))
+            logger.info(f"[PendingSub] Mentor {user['name']} students (from batches): {student_ids}")
 
+        # 2. Build the query - Fetching only lightweight list columns for high speed loading
+        query = supabase.table("submissions").select("id, student_id, subtopic_id, task_id, status, submitted_at").in_("status", ["pending", "rework"])
+        
+        if user["role"] == "mentor":
+            # The mentor should see submissions if:
+            # a) The student is in their list
+            # b) OR the submission is explicitly assigned to them
+            if student_ids:
+                s_list = ",".join(student_ids)
+                filter_str = f"student_id.in.({s_list}),mentor_id.eq.{user['id']}"
+                logger.info(f"[PendingSub] Applying filter: {filter_str}")
+                query = query.or_(filter_str)
+            else:
+                logger.info(f"[PendingSub] No students found, filtering by mentor_id only: {user['id']}")
+                query = query.eq("mentor_id", user["id"])
+        
+        subs_res = query.order("submitted_at", desc=True).execute()
+        subs = subs_res.data or []
+        logger.info(f"[PendingSub] Result: {len(subs)} items")
+        
+        if not subs: return []
+
+        # 3. Batch-fetch metadata
+        s_ids = list({s["student_id"] for s in subs if s.get("student_id")})
+        sub_ids = list({s["subtopic_id"] for s in subs if s.get("subtopic_id")})
+        
+        st_map = {st["id"]: st for st in (supabase.table("users").select("id, name, email").in_("id", s_ids).execute().data or [])} if s_ids else {}
+        sb_map = {sb["id"]: sb for sb in (supabase.table("subtopics").select("id, title, topic:topics(id, title)").in_("id", sub_ids).execute().data or [])} if sub_ids else {}
+            
+        for s in subs:
+            s["student"] = st_map.get(s.get("student_id"))
+            subtopic = sb_map.get(s.get("subtopic_id"))
+            s["topic"] = subtopic.get("topic") if subtopic else None
+            
+        return subs
+    except Exception as e:
+        logger.error(f"Error in pending_submissions: {str(e)}")
+        return []
 
 @api.get("/submissions/{submission_id}")
 async def get_submission(submission_id: str, user: dict = Depends(get_current_user)):
@@ -1065,7 +1252,11 @@ async def get_submission(submission_id: str, user: dict = Depends(get_current_us
     if user["role"] == "student" and sub["student_id"] != user["id"]:
         raise HTTPException(403, "Forbidden")
     sub["student"] = get_single_or_none(supabase.table("users").select("*").eq("id", sub["student_id"]))
-    sub["lesson"] = get_single_or_none(supabase.table("lessons").select("*").eq("id", sub["lesson_id"]))
+    
+    # Resolve the parent topic of the subtopic correctly
+    subtopic = get_single_or_none(supabase.table("subtopics").select("id, title, topic:topics(id, title)").eq("id", sub.get("subtopic_id")))
+    sub["topic"] = subtopic.get("topic") if subtopic else None
+    
     sub["task"] = get_single_or_none(supabase.table("tasks").select("*").eq("id", sub["task_id"]))
     return sub
 
@@ -1089,7 +1280,7 @@ async def review_submission(
     if payload.status == "approved":
         supabase.table("student_progress").upsert({
             "student_id": sub["student_id"],
-            "lesson_id": sub["lesson_id"],
+            "subtopic_id": sub["subtopic_id"],
             "is_completed": True,
             "completed_at": iso(now_utc()),
         }).execute()
@@ -1299,167 +1490,116 @@ async def admin_create_user(payload: AdminUserIn, _: dict = Depends(require_role
 # -------------------- Dashboards --------------------
 @api.get("/dashboard/student")
 async def student_dashboard(user: dict = Depends(require_roles("student"))):
-    # --- BATCH FILTER: Only show the course(s) from the student's assigned batch(es) ---
-    student_batches = supabase.table("batch_students")\
-        .select("batch_id, batches(course_id)")\
-        .eq("student_id", user["id"])\
-        .execute().data
-
-    batch_course_ids = []
-    for sb in (student_batches or []):
-        batch_info = sb.get("batches") or {}
-        cid = batch_info.get("course_id")
-        if cid and cid not in batch_course_ids:
-            batch_course_ids.append(cid)
-
-    if batch_course_ids:
-        courses = supabase.table("courses").select("*").eq("is_published", True).in_("id", batch_course_ids).execute().data
-    else:
-        # Student is not enrolled in any batch yet — show nothing
-        courses = []
-
-    result_courses = []
-    next_lesson = None
-
-    # Batch-fetch all student progress once
-    progress_records = supabase.table("student_progress").select("*").eq("student_id", user["id"]).eq("is_completed", True).execute().data
-    progress_set = {p["lesson_id"] for p in progress_records}
-
-    # Batch-fetch all modules for all courses, then all lessons for those modules
-    course_ids = [c["id"] for c in courses]
-    all_modules_raw = supabase.table("modules").select("*").in_("course_id", course_ids).order("sequence_order").execute().data if course_ids else []
-    
-    # Deduplicate modules by title (per course)
-    from collections import OrderedDict
-    mods_by_title_per_course = {} # course_id -> OrderedDict(title -> module)
-    all_module_ids_for_title = {} # title -> list of ids
-    for m in all_modules_raw:
-        cid = m["course_id"]
-        title = m.get("title", "").strip()
-        if cid not in mods_by_title_per_course:
-            mods_by_title_per_course[cid] = OrderedDict()
-        if title not in mods_by_title_per_course[cid]:
-            mods_by_title_per_course[cid][title] = m
-            all_module_ids_for_title[title] = [m["id"]]
-        else:
-            all_module_ids_for_title[title].append(m["id"])
-            
-    modules_by_course = {cid: list(mods.values()) for cid, mods in mods_by_title_per_course.items()}
-    all_module_ids = [mid for ids in all_module_ids_for_title.values() for mid in ids]
-    
-    all_lessons_raw = supabase.table("lessons").select("*").in_("module_id", all_module_ids).order("sequence_order").execute().data if all_module_ids else []
-    
-    # Deduplicate lessons by title per canonical module
-    title_to_canonical_id = {m.get("title","").strip(): m["id"] for mods in modules_by_course.values() for m in mods}
-    id_to_title = {mid: title for title, ids in all_module_ids_for_title.items() for mid in ids}
-    
-    lessons_by_module = {}
-    seen_lessons = {}
-    for l in all_lessons_raw:
-        mod_title = id_to_title.get(l["module_id"], "")
-        canonical_id = title_to_canonical_id.get(mod_title)
-        if canonical_id is None:
-            continue
-        if canonical_id not in lessons_by_module:
-            lessons_by_module[canonical_id] = []
-            seen_lessons[canonical_id] = set()
-        lesson_title = l.get("title", "").strip()
-        if lesson_title not in seen_lessons[canonical_id]:
-            seen_lessons[canonical_id].add(lesson_title)
-            lessons_by_module[canonical_id].append(l)
-
-    # Get mentor info
-    mentor = None
-    if user.get("assigned_mentor_id"):
-        mentor = get_single_or_none(supabase.table("users").select("id, name, email").eq("id", user["assigned_mentor_id"]))
-
-    for c in courses:
-        c_modules = modules_by_course.get(c["id"], [])
-        ordered = []
-        for m in c_modules:
-            ordered.extend(lessons_by_module.get(m["id"], []))
-        total = len(ordered)
-        completed = 0
-        first_unfinished = None
-        for l in ordered:
-            if l["id"] in progress_set:
-                completed += 1
-            elif first_unfinished is None:
-                first_unfinished = l
-        progress = round((completed / total) * 100) if total else 0
-        
-        course_data = {
-            "course": c,
-            "progress": progress,
-            "total_lessons": total,
-            "completed_lessons": completed,
-            "module_count": len(c_modules),
-            "next_lesson": first_unfinished,
-        }
-        result_courses.append(course_data)
-
-    # Smart Next Lesson Selection:
-    # 1. Look for In-Progress courses (1-99%)
-    in_progress_courses = [rc for rc in result_courses if 0 < rc["progress"] < 100]
-    if in_progress_courses:
-        # Sort by highest progress or just pick the first in-progress
-        best = sorted(in_progress_courses, key=lambda x: x["progress"], reverse=True)[0]
-        next_lesson = {"course": best["course"], "lesson": best["next_lesson"]}
-    else:
-        # 2. Fallback to Not Started courses (0%)
-        not_started = [rc for rc in result_courses if rc["progress"] == 0 and rc["next_lesson"]]
-        if not_started:
-            next_lesson = {"course": not_started[0]["course"], "lesson": not_started[0]["next_lesson"]}
-
-    pending = supabase.table("submissions").select("*").eq("student_id", user["id"]).in_("status", ["pending", "rework"]).execute().data
-    if pending:
-        p_lesson_ids = list({p["lesson_id"] for p in pending})
-        p_lessons = supabase.table("lessons").select("*").in_("id", p_lesson_ids).execute().data
-        p_lesson_map = {l["id"]: l for l in p_lessons}
-        for p in pending:
-            p["lesson"] = p_lesson_map.get(p["lesson_id"])
-
-    # --- Robust Retroactive XP Sync ---
-    sync_student_xp(user)
-
-    # Get Global/Weekly Rank - Unified with Leaderboard logic
-    rank = "N/A"
     try:
-        # Find rank among all students with XP
-        all_ranking = supabase.table("users")\
-            .select("id")\
-            .eq("role", "student")\
-            .order("total_xp", desc=True)\
-            .execute().data
+        # 1. Get batch/course context
+        enroll_res = supabase.table("batch_students").select("batch_id, batches(course_id, mentor_id)").eq("student_id", user["id"]).execute()
+        course_ids = list({e["batches"]["course_id"] for e in enroll_res.data if e.get("batches") and e["batches"].get("course_id")})
+        mentor_ids = list({e["batches"]["mentor_id"] for e in enroll_res.data if e.get("batches") and e["batches"].get("mentor_id")})
         
-        for i, s in enumerate(all_ranking or []):
-            if s["id"] == user["id"]:
-                rank = i + 1
-                break
-    except Exception as ge:
-        logger.error(f"Ranking error in dashboard: {ge}")
+        if not course_ids:
+            return {
+                "courses": [],
+                "mentor": None,
+                "next_topic": None,
+                "pending_submissions": [],
+                "pending_count": 0,
+                "gamification": {
+                    "total_xp": user.get("total_xp", 0),
+                    "level": user.get("level", 1),
+                    "streak": user.get("current_streak", 0),
+                    "weekly_rank": "N/A"
+                }
+            }
 
-    return {
-        "courses": result_courses,
-        "next_lesson": next_lesson,
-        "pending_submissions": pending,
-        "pending_count": len(pending),
-        "mentor": mentor,
-        "gamification": {
-            "total_xp": user.get("total_xp", 0),
-            "level": user.get("level", 1),
-            "streak": user.get("current_streak", 0),
-            "weekly_rank": rank
+        # 2. Parallel fetch essential data
+        import asyncio
+        async def fetch_data():
+            courses_t = asyncio.to_thread(lambda: supabase.table("courses").select("*").eq("is_published", True).in_("id", course_ids).execute().data or [])
+            progress_t = asyncio.to_thread(lambda: supabase.table("student_progress").select("*").eq("student_id", user["id"]).eq("is_completed", True).execute().data or [])
+            mentor_t = asyncio.to_thread(lambda: supabase.table("users").select("id, name, email").in_("id", mentor_ids).execute().data or [] if mentor_ids else [])
+            pending_t = asyncio.to_thread(lambda: supabase.table("submissions").select("*").eq("student_id", user["id"]).in_("status", ["pending", "rework"]).execute().data or [])
+            return await asyncio.gather(courses_t, progress_t, mentor_t, pending_t)
+
+        courses, progress_records, mentor_data, pending_subs = await fetch_data()
+        progress_set = {p["subtopic_id"] for p in progress_records if p.get("subtopic_id")}
+        mentor = mentor_data[0] if mentor_data else None
+
+        # 3. Process each course
+        result_courses = []
+        next_topic_data = None
+
+        for course in courses:
+            c_data = await get_course(course["id"], user)
+            all_st = []
+            module_count = len(c_data.get("modules", []))
+            for m in c_data.get("modules", []):
+                for t in m.get("topics", []):
+                    for s in t.get("subtopics", []):
+                        all_st.append({"subtopic": s, "topic": t})
+            
+            total = len(all_st)
+            completed_count = sum(1 for item in all_st if item["subtopic"].get("completed"))
+            
+            # Find next topic
+            first_unfinished = next((item for item in all_st if not item["subtopic"].get("completed")), None)
+            
+            if first_unfinished and not next_topic_data:
+                next_topic_data = {
+                    "course": course,
+                    "topic": first_unfinished["topic"],
+                    "subtopic": first_unfinished["subtopic"]
+                }
+
+            result_courses.append({
+                "course": course,
+                "progress": round((completed_count / total * 100)) if total > 0 else 0,
+                "completed_topics": completed_count,
+                "total_topics": total,
+                "module_count": module_count
+            })
+
+        # 4. Process pending submissions
+        for p in pending_subs:
+            # Topic might be missing if it's not pre-joined
+            if not p.get("topic"):
+                p["topic"] = {"title": "Homework Submission"} 
+
+        # 5. Gamification rank
+        rank = 1
+        try:
+            rank_res = supabase.table("users").select("id", count="exact").eq("role", "student").gt("total_xp", user.get("total_xp", 0)).execute()
+            rank = (rank_res.count or 0) + 1
+        except: pass
+
+        return {
+            "courses": result_courses,
+            "mentor": mentor,
+            "next_topic": next_topic_data,
+            "pending_submissions": pending_subs,
+            "pending_count": len(pending_subs),
+            "gamification": {
+                "total_xp": user.get("total_xp", 0),
+                "level": user.get("level", 1),
+                "streak": user.get("current_streak", 0),
+                "weekly_rank": rank
+            }
         }
-    }
+    except Exception as e:
+        logger.error(f"Error in student_dashboard: {str(e)}")
+        return {"courses": [], "mentor": None, "next_topic": None, "pending_submissions": [], "gamification": {}}
 
 
 @api.get("/auth/profile")
 async def get_profile(user: dict = Depends(get_current_user)):
-    # Fetch mentor if exists
+    # Fetch mentor via batch assignment if exists
     mentor = None
-    if user.get("assigned_mentor_id"):
-        mentor = get_single_or_none(supabase.table("users").select("id, name, email").eq("id", user["assigned_mentor_id"]))
+    try:
+        enroll_res = supabase.table("batch_students").select("batches(mentor_id)").eq("student_id", user["id"]).execute()
+        mentor_ids = list({e["batches"]["mentor_id"] for e in enroll_res.data if e.get("batches") and e["batches"].get("mentor_id")})
+        if mentor_ids:
+            mentor = get_single_or_none(supabase.table("users").select("id, name, email").eq("id", mentor_ids[0]))
+    except Exception as e:
+        logger.error(f"Error fetching mentor in get_profile: {e}")
     
     # Stats
     progress_count = supabase.table("student_progress").select("*", count="exact").eq("student_id", user["id"]).eq("is_completed", True).execute().count
@@ -1468,30 +1608,86 @@ async def get_profile(user: dict = Depends(get_current_user)):
         "user": user,
         "mentor": mentor,
         "stats": {
-            "completed_lessons": progress_count
+            "completed_topics": progress_count
         }
     }
 
 
 @api.get("/dashboard/mentor")
 async def mentor_dashboard(user: dict = Depends(require_roles("mentor"))):
-    pending = supabase.table("submissions").select("*", count="exact").or_("mentor_id.eq." + user["id"] + ",mentor_id.is.null").in_("status", ["pending", "rework"]).execute().count
-    approved = supabase.table("submissions").select("*", count="exact").eq("mentor_id", user["id"]).eq("status", "approved").execute().count
-    students = supabase.table("users").select("*", count="exact").eq("assigned_mentor_id", user["id"]).execute().count
-    return {"pending_reviews": pending, "approved_total": approved, "students_assigned": students}
+    try:
+        # 1. Get mentor's student set from batches
+        batches_res = supabase.table("batches").select("id").eq("mentor_id", user["id"]).execute()
+        b_ids = [b["id"] for b in batches_res.data] if batches_res.data else []
+        
+        student_ids = []
+        if b_ids:
+            bs_res = supabase.table("batch_students").select("student_id").in_("batch_id", b_ids).execute()
+            student_ids.extend([item["student_id"] for item in bs_res.data] if bs_res.data else [])
+        
+        student_ids = list(set(student_ids)) # Unique list
 
+        # 2. Calculate stats
+        pending = 0
+        approved = 0
+        
+        # Broaden filters to match pending_submissions logic and limit(1) for high performance exact counts
+        p_query = supabase.table("submissions").select("id", count="exact").in_("status", ["pending", "rework"])
+        a_query = supabase.table("submissions").select("id", count="exact").eq("status", "approved").eq("mentor_id", user["id"]).limit(1)
+        
+        if student_ids:
+            p_query = p_query.or_(f"student_id.in.({','.join(student_ids)}),mentor_id.eq.{user['id']}")
+        else:
+            p_query = p_query.eq("mentor_id", user["id"])
+
+        p_res = p_query.limit(1).execute()
+        pending = p_res.count if hasattr(p_res, 'count') else 0
+        
+        a_res = a_query.execute()
+        approved = a_res.count if hasattr(a_res, 'count') else 0
+        
+        return {
+            "pending_reviews": pending,
+            "approved_total": approved,
+            "students_assigned": len(student_ids)
+        }
+    except Exception as e:
+        logger.error(f"Error in mentor_dashboard: {str(e)}")
+        return {"pending_reviews": 0, "approved_total": 0, "students_assigned": 0}
 
 @api.get("/dashboard/admin")
 async def admin_dashboard(_: dict = Depends(require_roles("admin"))):
-    return {
-        "courses": supabase.table("courses").select("*", count="exact").execute().count,
-        "modules": supabase.table("modules").select("*", count="exact").execute().count,
-        "lessons": supabase.table("lessons").select("*", count="exact").execute().count,
-        "students": supabase.table("users").select("*", count="exact").eq("role", "student").eq("is_active", True).execute().count,
-        "mentors": supabase.table("users").select("*", count="exact").eq("role", "mentor").eq("is_active", True).execute().count,
-        "pending_submissions": supabase.table("submissions").select("*", count="exact").in_("status", ["pending", "rework"]).execute().count,
-        "approved_submissions": supabase.table("submissions").select("*", count="exact").eq("status", "approved").execute().count,
-    }
+    try:
+        c = supabase.table("courses").select("id", count="exact").execute().count or 0
+        m = supabase.table("modules").select("id", count="exact").execute().count or 0
+        t = supabase.table("topics").select("id", count="exact").execute().count or 0
+        s = supabase.table("subtopics").select("id", count="exact").execute().count or 0
+        b = supabase.table("batches").select("id", count="exact").execute().count or 0
+        
+        # User counts
+        students_count = supabase.table("users").select("id", count="exact").eq("role", "student").eq("is_active", True).execute().count or 0
+        mentors_count = supabase.table("users").select("id", count="exact").eq("role", "mentor").eq("is_active", True).execute().count or 0
+        
+        return {
+            "courses": c, 
+            "modules": m, 
+            "topics": t, 
+            "subtopics": s,
+            "batches": b,
+            "students": students_count,
+            "mentors": mentors_count
+        }
+    except Exception as e:
+        logger.error(f"Error in admin_dashboard: {str(e)}")
+        return {
+            "courses": 0, 
+            "modules": 0, 
+            "topics": 0, 
+            "subtopics": 0,
+            "batches": 0,
+            "students": 0,
+            "mentors": 0
+        }
 
 
 class ExecuteIn(BaseModel):
@@ -1559,8 +1755,8 @@ async def get_mentor_batches(user: dict = Depends(require_roles("mentor"))):
     return flattened
 
 
-@api.get("/batches/{batch_id}/lessons")
-async def get_batch_lessons(batch_id: str, user: dict = Depends(require_roles("mentor"))):
+@api.get("/batches/{batch_id}/topics")
+async def get_batch_topics(batch_id: str, user: dict = Depends(require_roles("mentor"))):
     # a. Fetch batch to get course_id
     batch = get_single_or_none(supabase.table("batches").select("course_id").eq("id", batch_id))
     if not batch:
@@ -1579,39 +1775,42 @@ async def get_batch_lessons(batch_id: str, user: dict = Depends(require_roles("m
         return []
         
     module_ids = [m["id"] for m in modules]
-    module_titles = {m["id"]: m["title"] for m in modules}
-    module_order = {m["id"]: m["sequence_order"] for m in modules}
+    mods_by_id = {m["id"]: m for m in modules}
     
-    # c. Fetch all lessons for those module_ids
-    lessons = supabase.table("lessons")\
+    # c. Fetch all topics for those module_ids
+    topics = supabase.table("topics")\
         .select("id, title, sequence_order, module_id")\
         .in_("module_id", module_ids)\
         .execute().data
-        
-    # d. Attach module_title and return
-    res = []
-    for l in lessons:
-        l["module_title"] = module_titles.get(l["module_id"])
-        res.append(l)
-        
-    # Ordered by module sequence_order ASC, then lesson sequence_order ASC
-    res.sort(key=lambda x: (module_order.get(x["module_id"], 0), x.get("sequence_order", 0)))
     
-    return res
+    # Map them back
+    for t in topics:
+        t["module_title"] = mods_by_id.get(t["module_id"], {}).get("title")
+    
+    # Ordered by module sequence_order ASC, then topic sequence_order ASC
+    topics.sort(key=lambda t: (mods_by_id.get(t["module_id"], {}).get("sequence_order") or 0, t.get("sequence_order") or 0))
+    return topics
 
 
-@api.get("/live-classes")
-async def list_live_classes(user: dict = Depends(require_roles("mentor"))):
-    res = supabase.table("class_sessions")\
-        .select("*, batches(name, courses(title)), lessons(title), recordings(url)")\
-        .eq("mentor_id", user["id"])\
-        .order("scheduled_at", desc=True)\
-        .execute().data
-    
+@api.get("/batches/sessions")
+async def get_all_sessions(user: dict = Depends(require_roles("mentor", "admin"))):
+    query = supabase.table("class_sessions")\
+        .select("*, batches(name, courses(title)), topics(title), recordings(url)")
+        
+    if user["role"] == "mentor":
+        mentor_batches = supabase.table("batches").select("id").eq("mentor_id", user["id"]).execute().data or []
+        mentor_batch_ids = [b["id"] for b in mentor_batches]
+        if mentor_batch_ids:
+            query = query.in_("batch_id", mentor_batch_ids)
+        else:
+            return []
+            
+    data = query.order("scheduled_at", desc=True).execute().data or []
+        
     flattened = []
-    for row in res:
+    for row in data:
         batch_info = row.pop("batches", {}) or {}
-        lesson_info = row.pop("lessons", {}) or {}
+        lesson_info = row.pop("topics", {}) or {}
         course_info = batch_info.get("courses", {}) or {}
         recs = row.pop("recordings", []) or []
         
@@ -1632,7 +1831,7 @@ async def create_live_class(payload: ScheduleSessionIn, user: dict = Depends(req
         doc = {
             "id": str(uuid.uuid4()),
             "batch_id": payload.batch_id,
-            "lesson_id": payload.lesson_id or None,
+            "topic_id": payload.topic_id or None,
             "custom_topic": payload.custom_topic or None,
             "mentor_id": user["id"],
             "status": "scheduled",
@@ -1662,8 +1861,13 @@ async def delete_live_class(class_id: str, user: dict = Depends(require_roles("m
     if user["role"] == "mentor" and existing["mentor_id"] != user["id"]:
         raise HTTPException(status_code=403, detail="You can only delete your own classes")
 
-    # 2. Delete
+    # 2. Delete linked records first (to avoid foreign key violations), then class
     try:
+        # Delete from recordings table
+        supabase.table("recordings").delete().eq("class_session_id", class_id).execute()
+        # Delete from attendance table
+        supabase.table("attendance").delete().eq("class_session_id", class_id).execute()
+        # Delete class session
         supabase.table("class_sessions").delete().eq("id", class_id).execute()
         return {"status": "success", "message": "Class deleted"}
     except Exception as e:
@@ -1733,21 +1937,35 @@ async def update_batch(batch_id: str, payload: BatchUpdateIn, _: dict = Depends(
 
 @api.delete("/admin/batches/{batch_id}")
 async def delete_batch(batch_id: str, _: dict = Depends(require_roles("admin"))):
-    # Guard: check for live class sessions
-    live_sessions = supabase.table("class_sessions")\
+    # 1. Safety Guard A: Prevent deleting batches with active student enrollments
+    students = supabase.table("batch_students")\
         .select("id")\
         .eq("batch_id", batch_id)\
-        .eq("status", "live")\
-        .execute().data
-        
+        .execute().data or []
+    if students:
+        raise HTTPException(400, "LMS Safety Alert: This batch has active student enrollments. To prevent student data loss, please reassign or remove all students from this batch before attempting to delete it.")
+
+    # 2. Safety Guard B: Prevent deleting batches with historical/scheduled class sessions
+    past_sessions = supabase.table("class_sessions")\
+        .select("id")\
+        .eq("batch_id", batch_id)\
+        .execute().data or []
+    if past_sessions:
+        raise HTTPException(400, "LMS Safety Alert: This batch has conducted class history. Deleting it will permanently erase historical attendance logs, class schedules, and meeting recordings. To prevent critical data loss, this batch cannot be deleted.")
+
+    # 3. Guard C: Check for any currently ACTIVE/LIVE class sessions
+    live_sessions = [s for s in past_sessions if s.get("status") == "live"]
     if live_sessions:
-        raise HTTPException(400, "Cannot delete a batch with a live class.")
+        raise HTTPException(400, "LMS Safety Alert: Cannot delete a batch with an active live class session running.")
         
-    # Delete in order: batch_students, then batches
-    supabase.table("batch_students").delete().eq("batch_id", batch_id).execute()
-    supabase.table("batches").delete().eq("id", batch_id).execute()
-    
-    return {"ok": True}
+    try:
+        # Since Guards A and B are active, a batch getting here is guaranteed to be a completely empty draft/test batch.
+        # It is 100% safe to delete cleanly!
+        supabase.table("batches").delete().eq("id", batch_id).execute()
+        return {"ok": True}
+    except Exception as e:
+        logger.error(f"Failed to delete batch {batch_id}: {e}")
+        raise HTTPException(400, f"Cannot delete batch: {str(e)}")
 
 
 @api.post("/admin/batches/{batch_id}/students")
@@ -2051,8 +2269,8 @@ async def submit_problem(id: str, payload: ProblemSubmitIn, user: dict = Depends
 def sync_student_xp(user: dict):
     try:
         # Calculate expected progress
-        progress_records = supabase.table("student_progress").select("lesson_id").eq("student_id", user["id"]).eq("is_completed", True).execute().data
-        progress_set = {p["lesson_id"] for p in progress_records}
+        progress_records = supabase.table("student_progress").select("subtopic_id").eq("student_id", user["id"]).eq("is_completed", True).execute().data
+        progress_set = {p["subtopic_id"] for p in progress_records}
         
         current_xp = user.get("total_xp", 0)
         approved_count = supabase.table("submissions").select("id", count="exact").eq("student_id", user["id"]).eq("status", "approved").execute().count or 0
@@ -2181,7 +2399,7 @@ async def start_session(session_id: str, user: dict = Depends(require_roles("men
     # --- AUTO-NOTIFY ---
     try:
         # Get lesson title
-        lesson = get_single_or_none(supabase.table("lessons").select("title").eq("id", session_data["lesson_id"]))
+        lesson = get_single_or_none(supabase.table("topics").select("title").eq("id", session_data["topic_id"]))
         topic_title = lesson["title"] if lesson else "New Class"
         
         batch_students = supabase.table("batch_students").select("student_id").eq("batch_id", session_data["batch_id"]).execute().data
@@ -2223,7 +2441,7 @@ async def end_session(session_id: str, user: dict = Depends(require_roles("mento
     try:
         supabase.table("recordings").insert({
             "class_session_id": session_id,
-            "lesson_id": session.get("lesson_id"),
+            "topic_id": session.get("topic_id"),
             "uploaded_by": user["id"],
             "uploaded_at": iso(now)
         }).execute()
@@ -2244,6 +2462,233 @@ async def end_session(session_id: str, user: dict = Depends(require_roles("mento
 
     return session
 
+def levenshtein_distance(s1: str, s2: str) -> int:
+    s1 = s1.lower().strip()
+    s2 = s2.lower().strip()
+    if len(s1) < len(s2):
+        return levenshtein_distance(s2, s1)
+    if len(s2) == 0:
+        return len(s1)
+
+    previous_row = range(len(s2) + 1)
+    for i, c1 in enumerate(s1):
+        current_row = [i + 1]
+        for j, c2 in enumerate(s2):
+            insertions = previous_row[j + 1] + 1
+            deletions = current_row[j] + 1
+            substitutions = previous_row[j] + (c1 != c2)
+            current_row.append(min(insertions, deletions, substitutions))
+        previous_row = current_row
+
+    return previous_row[-1]
+
+def fuzzy_match_student(name: str, email: str, enrolled_students: List[dict]):
+    if email:
+        email_clean = email.lower().strip()
+        for s in enrolled_students:
+            if s.get("email") and s["email"].lower().strip() == email_clean:
+                return s
+                
+    if name:
+        name_clean = name.lower().strip()
+        
+        # 1. Exact case-insensitive match
+        for s in enrolled_students:
+            if s.get("name") and s["name"].lower().strip() == name_clean:
+                return s
+                
+        # 2. Word-order independent match (e.g. "Kamsu Hari" vs "Hari Kamsu")
+        words_input = set(name_clean.split())
+        for s in enrolled_students:
+            if s.get("name"):
+                words_student = set(s["name"].lower().strip().split())
+                if words_input == words_student and len(words_input) > 0:
+                    return s
+                
+        # 3. Fuzzy matching with lowercased strings
+        best_match = None
+        best_dist = 9999
+        
+        for s in enrolled_students:
+            if s.get("name"):
+                student_name_clean = s["name"].lower().strip()
+                dist = levenshtein_distance(name_clean, student_name_clean)
+                if dist < best_dist:
+                    best_dist = dist
+                    best_match = s
+                    
+        max_allowed_dist = max(3, int(len(name_clean) * 0.35))
+        if best_dist <= max_allowed_dist:
+            return best_match
+            
+    return None
+
+def parse_duration_string(s: str) -> float:
+    s = s.lower().strip()
+    if not s:
+        return 0.0
+    try:
+        if s.replace(".", "", 1).isdigit():
+            return float(s)
+            
+        minutes = 0.0
+        # 1. Parse hours (h, hr, hour)
+        hr_match = re.search(r'([\d.]+)\s*(hr|hour|h\b)', s)
+        if hr_match:
+            minutes += float(hr_match.group(1)) * 60.0
+            
+        # 2. Parse minutes (m, min, minute)
+        min_match = re.search(r'([\d.]+)\s*(min|minute|m\b)', s)
+        if min_match:
+            minutes += float(min_match.group(1))
+            
+        # 3. Parse seconds (s, sec, second)
+        sec_match = re.search(r'([\d.]+)\s*(sec|second|s\b)', s)
+        if sec_match:
+            minutes += float(sec_match.group(1)) / 60.0
+            
+        hms_match = re.search(r'(\d+):(\d+):(\d+)', s)
+        if hms_match:
+            minutes = float(hms_match.group(1)) * 60.0 + float(hms_match.group(2)) + float(hms_match.group(3)) / 60.0
+        elif not hr_match and not min_match and not sec_match:
+            num_match = re.search(r'([\d.]+)', s)
+            if num_match:
+                minutes = float(num_match.group(1))
+                
+        return minutes
+    except Exception:
+        return 0.0
+
+def parse_and_combine_datetime(time_str: str, session_date: str) -> str:
+    if not time_str:
+        return None
+    time_str = time_str.strip()
+    
+    # If it already contains a full date, return it
+    if ('-' in time_str and len(time_str) >= 10) or ('/' in time_str and len(time_str) >= 10):
+        return time_str
+        
+    try:
+        # Check for AM/PM
+        is_pm = "pm" in time_str.lower()
+        is_am = "am" in time_str.lower()
+        
+        # Strip all alphabetic characters and extra spaces
+        cleaned_time = re.sub(r'[a-zA-Z\s]', '', time_str)
+        parts = cleaned_time.split(":")
+        
+        hour = 0
+        minute = 0
+        second = 0
+        
+        if len(parts) >= 2:
+            hour = int(parts[0])
+            minute = int(parts[1])
+            if len(parts) >= 3:
+                second = int(parts[2])
+                
+            if is_pm and hour < 12:
+                hour += 12
+            elif is_am and hour == 12:
+                hour = 0
+                
+            return f"{session_date}T{hour:02d}:{minute:02d}:{second:02d}Z"
+    except Exception as e:
+        logger.error(f"Error parsing time_str '{time_str}': {e}")
+        
+    return f"{session_date}T00:00:00Z"
+
+def parse_attendance_file(contents: str, filename: str) -> List[dict]:
+    records = []
+    is_html = filename.endswith(".html") or filename.endswith(".htm") or "<html" in contents.lower() or "<table" in contents.lower()
+    
+    if is_html:
+        rows = re.findall(r'<tr[^>]*>(.*?)</tr>', contents, re.DOTALL | re.IGNORECASE)
+        for row in rows:
+            cells = re.findall(r'<td[^>]*>(.*?)</td>', row, re.DOTALL | re.IGNORECASE)
+            if not cells:
+                continue
+            
+            cleaned_cells = [re.sub(r'<[^>]+>', '', cell).strip() for cell in cells]
+            
+            email = None
+            name = None
+            duration_minutes = 0.0
+            time_joined = None
+            
+            for c in cleaned_cells:
+                if "@" in c and "." in c and not email:
+                    email = c
+                elif ("min" in c.lower() or "hr" in c.lower() or "hour" in c.lower()) and duration_minutes == 0.0:
+                    duration_minutes = parse_duration_string(c)
+                elif c.isdigit() and duration_minutes == 0.0:
+                    duration_minutes = float(c)
+            
+            if cleaned_cells:
+                name = cleaned_cells[0]
+                
+            if email or name:
+                records.append({
+                    "name": name,
+                    "email": email,
+                    "duration_minutes": duration_minutes,
+                    "time_joined": time_joined
+                })
+    else:
+        import csv
+        import io
+        reader = csv.reader(io.StringIO(contents))
+        rows = list(reader)
+        if not rows:
+            return []
+            
+        header = [h.strip().lower() for h in rows[0]]
+        email_idx = -1
+        name_idx = -1
+        duration_idx = -1
+        joined_idx = -1
+        
+        for idx, h in enumerate(header):
+            if "email" in h:
+                email_idx = idx
+            elif "name" in h or "username" in h:
+                name_idx = idx
+            elif "duration" in h or "time" in h and ("min" in h or "dur" in h):
+                duration_idx = idx
+            elif "joined" in h or "time joined" in h or "first join" in h:
+                joined_idx = idx
+                
+        if email_idx == -1 and len(rows) > 1:
+            for idx, val in enumerate(rows[1]):
+                if "@" in val and "." in val:
+                    email_idx = idx
+                    break
+        
+        if name_idx == -1:
+            name_idx = 0
+            
+        for row in rows[1:]:
+            if not row or len(row) <= max(email_idx, name_idx):
+                continue
+                
+            email = row[email_idx] if email_idx != -1 and email_idx < len(row) else None
+            name = row[name_idx] if name_idx != -1 and name_idx < len(row) else None
+            
+            duration_str = row[duration_idx] if duration_idx != -1 and duration_idx < len(row) else "0"
+            duration_minutes = parse_duration_string(duration_str)
+            
+            time_joined = row[joined_idx] if joined_idx != -1 and joined_idx < len(row) else None
+            
+            if email or name:
+                records.append({
+                    "name": name.strip() if name else None,
+                    "email": email.strip() if email else None,
+                    "duration_minutes": duration_minutes,
+                    "time_joined": time_joined.strip() if time_joined else None
+                })
+                
+    return records
+
 
 @api.post("/sessions/{session_id}/join")
 async def join_session(session_id: str, user: dict = Depends(require_roles("student"))):
@@ -2254,54 +2699,208 @@ async def join_session(session_id: str, user: dict = Depends(require_roles("stud
     if session["status"] != "live":
         raise HTTPException(status_code=400, detail="Class is not live.")
     
-    now = now_utc()
-    started_at_str = session["started_at"]
-    if 'Z' in started_at_str:
-        started_at = datetime.fromisoformat(started_at_str.replace('Z', '+00:00'))
-    else:
-        started_at = datetime.fromisoformat(started_at_str)
+    # We no longer log student attendance when clicking "Join Now" in the app.
+    # Google Meet CSV upload is the sole source of truth.
+    return {"meeting_url": session["meeting_url"]}
 
-    is_late = now > (started_at + timedelta(minutes=10))
+
+@api.post("/sessions/{session_id}/attendance/upload")
+async def upload_attendance(
+    session_id: str,
+    file: UploadFile = File(...),
+    user: dict = Depends(require_roles("mentor", "admin"))
+):
+    session = get_single_or_none(supabase.table("class_sessions").select("*").eq("id", session_id))
+    if not session:
+        raise HTTPException(404, "Session not found")
+        
+    batch_id = session["batch_id"]
+    started_at_str = session.get("started_at")
+    ended_at_str = session.get("ended_at")
     
-    attendance_doc = {
-        "class_session_id": session_id,
-        "student_id": user["id"],
-        "status": "present",
-        "joined_at": iso(now),
-        "is_late": is_late
+    class_duration = 60
+    if started_at_str and ended_at_str:
+        try:
+            if 'Z' in started_at_str:
+                started_at = datetime.fromisoformat(started_at_str.replace('Z', '+00:00'))
+            else:
+                started_at = datetime.fromisoformat(started_at_str)
+                
+            if 'Z' in ended_at_str:
+                ended_at = datetime.fromisoformat(ended_at_str.replace('Z', '+00:00'))
+            else:
+                ended_at = datetime.fromisoformat(ended_at_str)
+                
+            diff_mins = int((ended_at - started_at).total_seconds() / 60)
+            if diff_mins > 0:
+                class_duration = diff_mins
+        except Exception as e:
+            logger.error(f"Error parsing session times: {e}")
+            
+    required_minutes = class_duration * 0.75
+
+    # Extract session date portion
+    session_date = None
+    ref_str = session.get("started_at") or session.get("scheduled_at")
+    if ref_str:
+        try:
+            session_date = ref_str[:10]  # YYYY-MM-DD
+        except Exception:
+            pass
+    if not session_date:
+        session_date = datetime.utcnow().strftime("%Y-%m-%d")
+
+    try:
+        contents = (await file.read()).decode("utf-8", errors="ignore")
+    except Exception as e:
+        raise HTTPException(400, f"Failed to read file: {str(e)}")
+        
+    csv_records = parse_attendance_file(contents, file.filename)
+    if not csv_records:
+        raise HTTPException(400, "Could not find any student records or valid headers in the uploaded file.")
+
+    bs_res = supabase.table("batch_students")\
+        .select("users(id, name, email, is_active)")\
+        .eq("batch_id", batch_id)\
+        .execute().data or []
+        
+    enrolled_students = []
+    for row in bs_res:
+        u = row.get("users")
+        if u and u.get("is_active") and u.get("id"):
+            enrolled_students.append({
+                "id": u["id"],
+                "name": u["name"],
+                "email": u["email"]
+            })
+            
+    if not enrolled_students:
+        raise HTTPException(400, "No enrolled students found in this batch to match attendance.")
+
+    matched_set = set()
+    unmatched_names = []
+    csv_student_statuses = {}
+    
+    for row in csv_records:
+        name = row.get("name")
+        email = row.get("email")
+        duration_minutes = row.get("duration_minutes", 0.0)
+        time_joined = row.get("time_joined")
+        
+        student = fuzzy_match_student(name, email, enrolled_students)
+        if student:
+            s_id = student["id"]
+            matched_set.add(s_id)
+            
+            status = "present" if duration_minutes >= required_minutes else "absent"
+            
+            # Normalize raw time-joined from CSV
+            normalized_joined = parse_and_combine_datetime(time_joined, session_date)
+            
+            if s_id in csv_student_statuses:
+                prev = csv_student_statuses[s_id]
+                new_dur = prev["duration_minutes"] + duration_minutes
+                new_status = "present" if new_dur >= required_minutes else "absent"
+                csv_student_statuses[s_id] = {
+                    "status": new_status,
+                    "joined_at": normalized_joined or prev["joined_at"],
+                    "duration_minutes": new_dur
+                }
+            else:
+                csv_student_statuses[s_id] = {
+                    "status": status,
+                    "joined_at": normalized_joined,
+                    "duration_minutes": duration_minutes
+                }
+        else:
+            if name and name.strip():
+                unmatched_names.append(name.strip())
+                
+    unmatched_names = list(set(unmatched_names))
+
+    final_attendance_list = []
+    
+    for s in enrolled_students:
+        s_id = s["id"]
+        if s_id in csv_student_statuses:
+            info = csv_student_statuses[s_id]
+            status = info["status"]
+            joined_at = info["joined_at"]
+            duration = info["duration_minutes"]
+        else:
+            status = "absent"
+            joined_at = None
+            duration = 0.0
+            
+        final_attendance_list.append({
+            "student_id": s_id,
+            "name": s["name"],
+            "email": s["email"],
+            "recommended_status": status,
+            "duration_minutes": duration,
+            "joined_at": joined_at,
+            "override_reason": f"Meet duration: {max(1, int(round(duration)))} min" if duration > 0 else None
+        })
+
+    return {
+        "matched": len(matched_set),
+        "unmatched": len(unmatched_names),
+        "total_enrolled": len(enrolled_students),
+        "unmatched_names": unmatched_names,
+        "draft_records": final_attendance_list
     }
-    
-    supabase.table("attendance").upsert(attendance_doc, on_conflict="class_session_id,student_id").execute()
-    
-    return {"meeting_url": session["meeting_url"], "is_late": is_late}
+
+
+@api.post("/sessions/{session_id}/attendance/bulk-save")
+async def bulk_save_attendance(session_id: str, payload: BulkSaveAttendanceRequest, user: dict = Depends(require_roles("mentor", "admin"))):
+    attendance_records = []
+    for r in payload.records:
+        attendance_records.append({
+            "class_session_id": session_id,
+            "student_id": r["student_id"],
+            "status": r["status"],
+            "joined_at": r.get("joined_at"),
+            "left_at": None,
+            "is_late": False,
+            "override_reason": r.get("override_reason")
+        })
+        
+    try:
+        if attendance_records:
+            supabase.table("attendance").upsert(attendance_records, on_conflict="class_session_id,student_id").execute()
+    except Exception as e:
+        logger.error(f"Error bulk saving attendance: {e}")
+        raise HTTPException(500, f"Database upsert failed: {str(e)}")
+        
+    return {"success": True}
 
 
 # -------------------- Attendance --------------------
 
 @api.get("/sessions/{session_id}/attendance")
 async def get_session_attendance(session_id: str, user: dict = Depends(require_roles("mentor", "admin"))):
-    # 1. Get session info to find the batch_id
     session = get_single_or_none(supabase.table("class_sessions").select("batch_id").eq("id", session_id))
     if not session:
         raise HTTPException(404, "Session not found")
         
     batch_id = session["batch_id"]
     
-    # 2. Get existing attendance records
     existing_res = supabase.table("attendance")\
-        .select("*, users(name)")\
+        .select("*, users(name, email)")\
         .eq("class_session_id", session_id)\
         .execute().data
         
-    # 3. Get all active students in the batch
-    students = supabase.table("users")\
-        .select("id, name")\
+    bs_res = supabase.table("batch_students")\
+        .select("users(id, name, email, is_active)")\
         .eq("batch_id", batch_id)\
-        .eq("role", "student")\
-        .eq("is_active", True)\
-        .execute().data
+        .execute().data or []
         
-    # 4. Merge: ensure every student has a record (default to 'absent' if missing)
+    students = []
+    for row in bs_res:
+        u = row.get("users")
+        if u and u.get("is_active") and u.get("id"):
+            students.append({"id": u["id"], "name": u["name"], "email": u.get("email")})
+            
     attendance_map = {r["student_id"]: r for r in existing_res}
     
     final_records = []
@@ -2310,6 +2909,7 @@ async def get_session_attendance(session_id: str, user: dict = Depends(require_r
             record = attendance_map[s["id"]]
             user_info = record.pop("users", {}) or {}
             record["student_name"] = user_info.get("name")
+            record["student_email"] = user_info.get("email")
             record["avatar_url"] = None
             final_records.append(record)
         else:
@@ -2317,6 +2917,7 @@ async def get_session_attendance(session_id: str, user: dict = Depends(require_r
             final_records.append({
                 "student_id": s["id"],
                 "student_name": s["name"],
+                "student_email": s.get("email"),
                 "avatar_url": None,
                 "status": "absent",
                 "joined_at": None,
@@ -2349,7 +2950,6 @@ async def override_attendance(session_id: str, student_id: str, payload: Attenda
     supabase.table("attendance").update(doc).eq("id", existing["id"]).execute()
     return {"ok": True}
 
-
 @api.get("/batches/{batch_id}/progress-summary")
 async def get_batch_progress_summary(batch_id: str, user: dict = Depends(require_roles("mentor", "admin"))):
     # 1. Get Batch & Course info
@@ -2357,41 +2957,49 @@ async def get_batch_progress_summary(batch_id: str, user: dict = Depends(require
     if not batch: raise HTTPException(404, "Batch not found")
     course_id = batch["course_id"]
     
-    # 2. Get total lessons in course
-    lessons = supabase.table("lessons").select("id").eq("is_published", True).execute().data or []
-    # Actually we only want lessons in this specific course
-    lessons = [l for l in lessons if l.get("course_id") == course_id] # Simple filter if relation is flat
-    # Wait, better query:
-    lessons_res = supabase.table("lessons").select("id, module_id(course_id)").execute().data or []
-    course_lesson_ids = [l["id"] for l in lessons_res if l.get("module_id", {}).get("course_id") == course_id]
-    total_lessons_count = len(course_lesson_ids)
+    # 2. Get total subtopics in course (used internally for % calculation)
+    modules = supabase.table("modules").select("id").eq("course_id", course_id).execute().data or []
+    module_ids = [m["id"] for m in modules]
+    topics = supabase.table("topics").select("id").in_("module_id", module_ids).execute().data or []
+    topic_ids = [t["id"] for t in topics]
+    subtopics = supabase.table("subtopics").select("id").in_("topic_id", topic_ids).execute().data or []
+    course_subtopic_ids = [s["id"] for s in subtopics]
+    total_subtopics_count = len(course_subtopic_ids)
+    # Each batch is linked to exactly 1 course
+    total_courses = 1
 
-    # 3. Get all students in this batch OR assigned to this mentor
-    students = supabase.table("users").select("id, name, email")\
-        .eq("role", "student")\
-        .or_(f"batch_id.eq.{batch_id},assigned_mentor_id.eq.{user['id']}")\
-        .execute().data or []
+    # 3. Get all students in this batch via batch_students enrollment
+    bs_res = supabase.table("batch_students").select("users(id, name, email)").eq("batch_id", batch_id).execute().data or []
+    students = []
+    for row in bs_res:
+        u = row.get("users")
+        if u:
+            students.append(u)
+            
     if not students: return []
     student_ids = [s["id"] for s in students]
 
     # 4. Get completion data for all students in bulk
-    progress_records = supabase.table("student_progress").select("student_id, lesson_id").in_("student_id", student_ids).eq("is_completed", True).execute().data or []
-    lc_records = supabase.table("lesson_completions").select("student_id, lesson_id, time_spent_minutes").in_("student_id", student_ids).execute().data or []
+    progress_records = supabase.table("student_progress").select("student_id, subtopic_id").in_("student_id", student_ids).eq("is_completed", True).execute().data or []
+    lc_records = supabase.table("subtopic_completions").select("student_id, subtopic_id, time_spent_minutes").in_("student_id", student_ids).execute().data or []
     
-    # Filter only relevant lessons
-    progress_records = [r for r in progress_records if r["lesson_id"] in course_lesson_ids]
-    lc_records = [r for r in lc_records if r["lesson_id"] in course_lesson_ids]
+    # Filter only relevant subtopics
+    progress_records = [r for r in progress_records if r["subtopic_id"] in course_subtopic_ids]
+    lc_records = [r for r in lc_records if r["subtopic_id"] in course_subtopic_ids]
 
     # 5. Build summary
     summary = []
     for s in students:
         s_id = s["id"]
-        # Count unique completed lessons
-        completed_set = {r["lesson_id"] for r in progress_records if r["student_id"] == s_id}
-        completed_set.update({r["lesson_id"] for r in lc_records if r["student_id"] == s_id})
+        # Count unique completed subtopics
+        completed_set = {r["subtopic_id"] for r in progress_records if r["student_id"] == s_id}
+        completed_set.update({r["subtopic_id"] for r in lc_records if r["student_id"] == s_id})
         
         done = len(completed_set)
-        pct = round((done / total_lessons_count * 100)) if total_lessons_count > 0 else 0
+        pct = round((done / total_subtopics_count * 100)) if total_subtopics_count > 0 else 0
+        
+        # A course is "completed" when the student finishes 100% of all subtopics
+        completed_courses = 1 if (total_subtopics_count > 0 and done >= total_subtopics_count) else 0
         
         # Calculate time spent
         time_spent = sum(r.get("time_spent_minutes", 0) or 0 for r in lc_records if r["student_id"] == s_id)
@@ -2399,74 +3007,97 @@ async def get_batch_progress_summary(batch_id: str, user: dict = Depends(require
         summary.append({
             "student_id": s_id,
             "student_name": s["name"],
-            "completed_lessons": done,
-            "total_lessons": total_lessons_count,
+            "completed_topics": completed_courses,
+            "total_topics": total_courses,
             "overall_percentage": pct,
             "total_time_spent_minutes": time_spent
         })
-
     return summary
 
 
 @api.get("/batches/{batch_id}/attendance-summary")
 async def get_batch_attendance_summary(batch_id: str, user: dict = Depends(require_roles("mentor", "admin"))):
     try:
-        # 1. Get all session IDs for this batch
-        sessions = supabase.table("class_sessions").select("id").eq("batch_id", batch_id).execute().data
-        if not sessions: return []
+        # 1. Get all enrolled active students in this batch from batch_students
+        bs_res = supabase.table("batch_students")\
+            .select("users(id, name, email, is_active)")\
+            .eq("batch_id", batch_id)\
+            .execute().data or []
+            
+        enrolled_students = []
+        for row in bs_res:
+            u = row.get("users")
+            if u and u.get("is_active") and u.get("id"):
+                enrolled_students.append({
+                    "id": u["id"],
+                    "name": u["name"]
+                })
+                
+        if not enrolled_students:
+            return []
+
+        # 2. Get all session IDs for this batch
+        sessions = supabase.table("class_sessions").select("id").eq("batch_id", batch_id).execute().data or []
         session_ids = [s["id"] for s in sessions]
 
-        # 2. Get attendance records for these sessions
-        rows = supabase.table("attendance").select("student_id, status").in_("class_session_id", session_ids).execute().data
-        if not rows: return []
+        # 3. If there are no sessions conducted yet, return baseline empty-stats rows for all students
+        if not session_ids:
+            return [{
+                "student_id": s["id"],
+                "student_name": s["name"],
+                "avatar_url": None,
+                "total_sessions": 0,
+                "present_count": 0,
+                "late_count": 0,
+                "absent_count": 0,
+                "attendance_percentage": 0
+            } for s in enrolled_students]
+
+        # 4. Get attendance records for these sessions
+        rows = supabase.table("attendance").select("student_id, status").in_("class_session_id", session_ids).execute().data or []
         
-        # 3. Aggregate statistics
-        summary = defaultdict(lambda: {"present": 0, "late": 0, "absent": 0, "total": 0})
-        unique_student_ids = set()
+        # 5. Initialize summary with baseline total sessions for all enrolled students
+        summary = {}
+        for s in enrolled_students:
+            summary[s["id"]] = {
+                "present": 0,
+                "late": 0,
+                "absent": 0,
+                "total": len(session_ids)
+            }
+
+        # 6. Aggregate explicitly recorded status counts
         for row in rows:
             sid = row["student_id"]
-            if not sid: continue
-            unique_student_ids.add(sid)
+            if not sid or sid not in summary:
+                continue
             status = row["status"]
-            if status in summary[sid]:
-                summary[sid][status] += 1
-            summary[sid]["total"] += 1
+            if status == "present":
+                summary[sid]["present"] += 1
+            elif status == "late":
+                summary[sid]["late"] += 1
+            elif status == "absent":
+                summary[sid]["absent"] += 1
 
-        # 4. Fetch student profile info separately (avoiding problematic join)
-        student_info = {}
-        if unique_student_ids:
-            # SCHEMA DISCOVERY: Fetch one user to see all keys
-            all_users = supabase.table("users").select("*").limit(1).execute().data
-            if all_users:
-                available_keys = list(all_users[0].keys())
-                logger.info(f"Available user keys: {available_keys}")
-                # Try to guess the avatar column
-                avatar_key = next((k for k in ["avatar_url", "profile_picture_url", "avatar", "image", "photo"] if k in available_keys), None)
-                
-                # Fetch actual data
-                select_fields = f"id, name, {avatar_key}" if avatar_key else "id, name"
-                user_rows = supabase.table("users").select(select_fields).in_("id", list(unique_student_ids)).execute().data
-                for u in user_rows:
-                    student_info[u["id"]] = {
-                        "name": u.get("name") or "Unknown Student",
-                        "avatar_url": u.get(avatar_key) if avatar_key else None
-                    }
-            else:
-                # Fallback if no users found (shouldn't happen here)
-                for sid in unique_student_ids:
-                    student_info[sid] = {"name": "Unknown Student", "avatar_url": None}
-                
-        # 5. Build final result
-        result = []
+        # 7. Convert unrecorded sessions into implicit absences
         for sid, counts in summary.items():
+            recorded = counts["present"] + counts["late"] + counts["absent"]
+            implicit = max(0, len(session_ids) - recorded)
+            counts["absent"] += implicit
+
+        # 8. Build final result list
+        result = []
+        for s in enrolled_students:
+            sid = s["id"]
+            counts = summary[sid]
             total = counts["total"]
             present = counts["present"] + counts["late"]
             pct = round((present / total * 100), 1) if total > 0 else 0
-            info = student_info.get(sid, {"name": "Unknown Student", "avatar_url": None})
+            
             result.append({
                 "student_id": sid,
-                "student_name": info["name"],
-                "avatar_url": info["avatar_url"],
+                "student_name": s["name"],
+                "avatar_url": None,
                 "total_sessions": total,
                 "present_count": counts["present"],
                 "late_count": counts["late"],
@@ -2511,96 +3142,119 @@ async def get_specific_student_progress(student_id: str, batchId: str = None, us
     if not course: return {"course_title": None, "error": "No course enrolled"}
 
     # 4. Get Syllabus
-    modules = supabase.table("modules").select("*, lessons(*)").eq("course_id", course["id"]).order("sequence_order").execute().data or []
+    modules = supabase.table("modules").select("*, topics(*, subtopics(*))").eq("course_id", course["id"]).order("sequence_order").execute().data or []
+    
+    # Sort topics and subtopics by sequence_order consistently
+    for m in modules:
+        if m.get("topics"):
+            m["topics"].sort(key=lambda t: t.get("sequence_order") or 0)
+            for t in m["topics"]:
+                if t.get("subtopics"):
+                    t["subtopics"].sort(key=lambda s: s.get("sequence_order") or 0)
+                else:
+                    t["subtopics"] = []
+        else:
+            m["topics"] = []
     
     # 5. Get Student Data
-    progress_res = supabase.table("student_progress").select("lesson_id").eq("student_id", student_id).eq("is_completed", True).execute().data or []
-    progress_set = {p["lesson_id"] for p in progress_res}
+    progress_res = supabase.table("student_progress").select("subtopic_id").eq("student_id", student_id).eq("is_completed", True).execute().data or []
+    progress_set = {p["subtopic_id"] for p in progress_res}
     
     sub_res = supabase.table("submissions").select("task_id, status").eq("student_id", student_id).eq("status", "approved").execute().data or []
     approved_tasks = {s["task_id"] for s in sub_res}
     
-    lc_res = supabase.table("lesson_completions").select("lesson_id, time_spent_minutes, completed_at").eq("student_id", student_id).execute().data or []
-    lc_map = {lc["lesson_id"]: lc for lc in lc_res}
+    lc_res = supabase.table("subtopic_completions").select("subtopic_id, time_spent_minutes, completed_at").eq("student_id", student_id).execute().data or []
+    lc_map = {lc["subtopic_id"]: lc for lc in lc_res}
 
     # 6. Build Result
     res_modules = []
-    total_lessons = 0
-    completed_lessons = 0
+    total_subtopics = 0
+    completed_subtopics = 0
     total_time = 0
 
     for m in modules:
-        m_lessons = []
-        m_done = 0
-        m_total = 0
+        m_topics = []
+        m_total_sub = 0
+        m_done_sub = 0
         
-        # Sort lessons by order
-        lessons = sorted(m.get("lessons") or [], key=lambda l: l.get("sequence_order") or 0)
-        
-        for l in lessons:
-            # A lesson is completed if it has an approved task OR it's a content-only lesson marked as done
-            has_task = supabase.table("tasks").select("id").eq("lesson_id", l["id"]).limit(1).execute().data
-            
-            is_done = False
-            comp_at = None
-            time_spent = 0
-            
-            if has_task:
-                task_id = has_task[0]["id"]
-                is_done = task_id in approved_tasks
-            else:
-                is_done = l["id"] in progress_set or l["id"] in lc_map
-            
-            if l["id"] in lc_map:
-                comp_at = lc_map[l["id"]]["completed_at"]
-                time_spent = lc_map[l["id"]]["time_spent_minutes"] or 0
-
-            m_lessons.append({
-                "id": l["id"],
-                "title": l["title"],
-                "is_completed": is_done,
-                "completed_at": comp_at,
-                "time_spent_minutes": time_spent
+        for t in m.get("topics", []):
+            t_subtopics = []
+            for s in t.get("subtopics", []):
+                total_subtopics += 1
+                m_total_sub += 1
+                
+                has_task = supabase.table("tasks").select("id").eq("subtopic_id", s["id"]).limit(1).execute().data
+                
+                is_done = False
+                comp_at = None
+                time_spent = 0
+                
+                if has_task:
+                    task_id = has_task[0]["id"]
+                    is_done = task_id in approved_tasks
+                else:
+                    is_done = s["id"] in progress_set or s["id"] in lc_map
+                    
+                if s["id"] in lc_map:
+                    comp_at = lc_map[s["id"]]["completed_at"]
+                    time_spent = lc_map[s["id"]]["time_spent_minutes"] or 0
+                elif s["id"] in progress_set:
+                    is_done = True
+                    
+                if is_done:
+                    m_done_sub += 1
+                    completed_subtopics += 1
+                    
+                total_time += time_spent
+                
+                t_subtopics.append({
+                    "id": s["id"],
+                    "title": s["title"],
+                    "is_completed": is_done,
+                    "completed_at": comp_at,
+                    "time_spent_minutes": time_spent
+                })
+                
+            m_topics.append({
+                "id": t["id"],
+                "title": t["title"],
+                "subtopics": t_subtopics
             })
-            
-            m_total += 1
-            if is_done: m_done += 1
-            total_time += time_spent
 
         res_modules.append({
             "id": m["id"],
             "title": m["title"],
-            "lessons": m_lessons,
-            "total_lessons": m_total,
-            "completed_lessons": m_done,
-            "completion_percentage": round(m_done / m_total * 100) if m_total > 0 else 0
+            "topics": m_topics,
+            "total_subtopics": m_total_sub,
+            "completed_subtopics": m_done_sub,
+            "completion_percentage": round(m_done_sub / m_total_sub * 100) if m_total_sub > 0 else 0
         })
-        
-        total_lessons += m_total
-        completed_lessons += m_done
 
-    # 7. Find next incomplete lesson
-    current_lesson = None
+    # 7. Find next incomplete subtopic
+    current_subtopic = None
     for m in res_modules:
-        for l in m["lessons"]:
-            if not l["is_completed"]:
-                current_lesson = {
-                    "lesson_id": l["id"],
-                    "lesson_title": l["title"],
-                    "module_title": m["title"]
-                }
-                break
-        if current_lesson: break
+        for t in m["topics"]:
+            for s in t["subtopics"]:
+                if not s["is_completed"]:
+                    current_subtopic = {
+                        "subtopic_id": s["id"],
+                        "subtopic_title": s["title"],
+                        "topic_title": t["title"],
+                        "module_title": m["title"]
+                    }
+                    break
+            if current_subtopic: break
+        if current_subtopic: break
 
     return {
         "course_title": course["title"],
         "batch_name": batch["name"],
-        "overall_percentage": round(completed_lessons / total_lessons * 100) if total_lessons > 0 else 0,
-        "total_lessons": total_lessons,
-        "completed_lessons": completed_lessons,
+        "overall_percentage": round(completed_subtopics / total_subtopics * 100) if total_subtopics > 0 else 0,
+        "total_subtopics": total_subtopics,
+        "completed_subtopics": completed_subtopics,
         "total_time_spent_minutes": total_time,
         "modules": res_modules,
-        "current_lesson": current_lesson
+        "current_subtopic": current_subtopic
     }
 
 
@@ -2610,7 +3264,7 @@ async def get_student_attendance(student_id: str, user: dict = Depends(get_curre
         raise HTTPException(403, "Cannot view another student's attendance.")
         
     res = supabase.table("attendance")\
-        .select("*, class_sessions!inner(scheduled_at, status, batch_id, lessons(title), batches(name))")\
+        .select("*, class_sessions!inner(scheduled_at, status, batch_id, topics(title), batches(name))")\
         .eq("student_id", student_id)\
         .order("class_sessions.scheduled_at", desc=True)\
         .execute().data
@@ -2622,7 +3276,7 @@ async def get_student_attendance(student_id: str, user: dict = Depends(get_curre
     
     for row in res:
         session_info = row.pop("class_sessions", {}) or {}
-        lesson_info = session_info.get("lessons", {}) or {}
+        lesson_info = session_info.get("topics", {}) or {}
         batch_info = session_info.get("batches", {}) or {}
         row["scheduled_at"] = session_info.get("scheduled_at")
         row["lesson_title"] = lesson_info.get("title")
@@ -2704,14 +3358,14 @@ async def get_admin_attendance_overview(user: dict = Depends(require_roles("admi
 @api.get("/sessions/{session_id}/status")
 async def get_session_status(session_id: str, user: dict = Depends(get_current_user)):
     session = get_single_or_none(supabase.table("class_sessions")
-      .select("id, status, meeting_url, started_at, scheduled_at, batch_id, lesson_id, batches(name, course_id, courses(title)), lessons(title)")
+      .select("id, status, meeting_url, started_at, scheduled_at, batch_id, topic_id, batches(name, course_id, courses(title)), topics(title)")
       .eq("id", session_id))
     if not session:
         raise HTTPException(404, "Session not found")
         
     batch_info = session.pop("batches", {}) or {}
     course_info = batch_info.pop("courses", {}) or {}
-    lesson_info = session.pop("lessons", {}) or {}
+    lesson_info = session.pop("topics", {}) or {}
     
     session["batch_name"] = batch_info.get("name")
     session["course_id"] = batch_info.get("course_id")
@@ -2750,7 +3404,7 @@ async def upload_recording(session_id: str, payload: RecordingIn, user: dict = D
     else:
         doc["id"] = str(uuid.uuid4())
         doc["class_session_id"] = session_id
-        doc["lesson_id"] = session["lesson_id"]
+        doc["topic_id"] = session["topic_id"]
         doc["uploaded_by"] = user["id"]
         res = supabase.table("recordings").insert(doc).execute()
         
@@ -2759,7 +3413,7 @@ async def upload_recording(session_id: str, payload: RecordingIn, user: dict = D
     # --- AUTO-NOTIFY ---
     if recording:
         try:
-            lesson = get_single_or_none(supabase.table("lessons").select("title").eq("id", session["lesson_id"]))
+            lesson = get_single_or_none(supabase.table("topics").select("title").eq("id", session["topic_id"]))
             lesson_title = lesson["title"] if lesson else "Session"
             
             batch_students = supabase.table("batch_students").select("student_id").eq("batch_id", session["batch_id"]).execute().data
@@ -2821,7 +3475,7 @@ async def get_batch_recordings(batch_id: str, user: dict = Depends(get_current_u
     
     # Step 2: fetch recordings for those sessions
     res = supabase.table("recordings")\
-        .select("*, class_sessions(scheduled_at, status, lessons(title, modules(title)))")\
+        .select("*, class_sessions(scheduled_at, status, custom_topic, topics(title, modules(title)))")\
         .in_("class_session_id", session_ids)\
         .order("uploaded_at", desc=True)\
         .execute().data
@@ -2829,9 +3483,10 @@ async def get_batch_recordings(batch_id: str, user: dict = Depends(get_current_u
     flattened = []
     for row in res:
         session_info = row.pop("class_sessions", {}) or {}
-        lesson_info = session_info.get("lessons", {}) or {}
+        lesson_info = session_info.get("topics", {}) or {}
         module_info = lesson_info.get("modules", {}) or {}
         row["scheduled_at"] = session_info.get("scheduled_at")
+        row["custom_topic"] = session_info.get("custom_topic")
         row["lesson_title"] = lesson_info.get("title")
         row["module_title"] = module_info.get("title")
         flattened.append(row)
@@ -2860,7 +3515,7 @@ async def get_mentor_recordings(user: dict = Depends(require_roles("mentor"))):
     
     # Step 2: fetch recordings
     res = supabase.table("recordings")\
-        .select("*, class_sessions(scheduled_at, status, lessons(title, modules(title)))")\
+        .select("*, class_sessions(scheduled_at, status, custom_topic, topics(title, modules(title)))")\
         .in_("class_session_id", session_ids)\
         .order("uploaded_at", desc=True)\
         .execute().data
@@ -2869,10 +3524,11 @@ async def get_mentor_recordings(user: dict = Depends(require_roles("mentor"))):
     flattened = []
     for row in res:
         session_info = row.pop("class_sessions", {}) or {}
-        lesson_info = session_info.get("lessons", {}) or {}
+        lesson_info = session_info.get("topics", {}) or {}
         module_info = lesson_info.get("modules", {}) or {}
         row["batch_name"] = batch_name_map.get(row.get("class_session_id"))
         row["scheduled_at"] = session_info.get("scheduled_at")
+        row["custom_topic"] = session_info.get("custom_topic")
         row["lesson_title"] = lesson_info.get("title")
         row["module_title"] = module_info.get("title")
         flattened.append(row)
@@ -2998,23 +3654,61 @@ async def get_batch_sessions(batch_id: str, user: dict = Depends(get_current_use
         if not in_batch:
             raise HTTPException(403, "You are not enrolled in this batch.")
             
-    # Join with batches (to get course info) and lessons (to get topic title)
+    # Join with batches (to get course info) and topics (to get topic title)
     res = supabase.table("class_sessions")\
-        .select("*, batches(name, courses(title)), lessons(title)")\
+        .select("*, batches(name, courses(title)), topics(title)")\
         .eq("batch_id", batch_id)\
         .order("scheduled_at", desc=True)\
-        .execute().data
+        .execute().data or []
+        
+    session_ids = [s["id"] for s in res]
+    
+    # Get active batch students count
+    bs_res = supabase.table("batch_students")\
+        .select("users(id, is_active)")\
+        .eq("batch_id", batch_id)\
+        .execute().data or []
+    active_students = [r.get("users") for r in bs_res if r.get("users") and r["users"].get("is_active")]
+    total_students = len(active_students)
+    
+    attendance_stats = {}
+    if session_ids:
+        att_res = supabase.table("attendance")\
+            .select("class_session_id, status")\
+            .in_("class_session_id", session_ids)\
+            .execute().data or []
+            
+        for a in att_res:
+            s_id = a["class_session_id"]
+            status = a["status"]
+            if s_id not in attendance_stats:
+                attendance_stats[s_id] = {"present": 0, "absent": 0}
+            if status == "present":
+                attendance_stats[s_id]["present"] += 1
+            else:
+                attendance_stats[s_id]["absent"] += 1
     
     # Flatten the results for the frontend
     flattened = []
     for s in res:
         batch_info = s.pop("batches", {}) or {}
-        lesson_info = s.pop("lessons", {}) or {}
+        topic_info = s.pop("topics", {}) or {}
         course_info = batch_info.get("courses", {}) or {}
         
         s["batch_name"] = batch_info.get("name")
         s["course_title"] = course_info.get("title")
-        s["topic_title"] = lesson_info.get("title")
+        s["topic_title"] = topic_info.get("title")
+        
+        # Add attendance stats
+        stats = attendance_stats.get(s["id"], {"present": 0, "absent": 0})
+        s["present_count"] = stats["present"]
+        s["absent_count"] = stats["absent"]
+        s["total_students"] = total_students
+        if total_students > 0:
+            s["attendance_percentage"] = int(round((stats["present"] / total_students) * 100))
+        else:
+            s["attendance_percentage"] = 0
+            
         flattened.append(s)
         
     return flattened
@@ -3205,24 +3899,36 @@ def seed_data():
                 "sequence_order": m_idx,
                 "created_at": iso(now_utc()),
             }).execute()
-            for l_idx, l in enumerate(m["lessons"]):
-                lid = str(uuid.uuid4())
-                supabase.table("lessons").insert({
-                    "id": lid,
+            for t_idx, t_item in enumerate(m["lessons"]):
+                tid = str(uuid.uuid4())
+                supabase.table("topics").insert({
+                    "id": tid,
                     "module_id": mid,
-                    "title": l["title"],
-                    "video_url": "https://www.youtube.com/embed/eIrMbAQSU34",
-                    "content": l["content"],
-                    "sequence_order": l_idx,
+                    "title": t_item["title"],
+                    "sequence_order": t_idx,
                     "created_at": iso(now_utc()),
                 }).execute()
-                tid = str(uuid.uuid4())
+                
+                # Create a subtopic for the content
+                sid = str(uuid.uuid4())
+                supabase.table("subtopics").insert({
+                    "id": sid,
+                    "topic_id": tid,
+                    "title": f"Intro: {t_item['title']}",
+                    "video_url": "https://www.youtube.com/embed/eIrMbAQSU34",
+                    "content_html": t_item["content"],
+                    "sequence_order": 0,
+                    "created_at": iso(now_utc()),
+                }).execute()
+
+                # Create the task for the subtopic
+                task_id = str(uuid.uuid4())
                 supabase.table("tasks").insert({
-                    "id": tid,
-                    "lesson_id": lid,
-                    "description": l["task"]["description"],
-                    "instructions": l["task"]["instructions"],
-                    "expected_output": l["task"]["expected_output"],
+                    "id": task_id,
+                    "subtopic_id": sid,
+                    "description": t_item["task"]["description"],
+                    "instructions": t_item["task"]["instructions"],
+                    "expected_output": t_item["task"]["expected_output"],
                     "created_at": iso(now_utc()),
                 }).execute()
         logger.info("Seeded sample course")
@@ -3280,71 +3986,96 @@ async def get_course(course_id: str, user: dict = Depends(get_current_user)):
         raise HTTPException(404, "Course not found")
     course = course_res.data
     
-    # Bulk fetch modules and lessons
-    modules = supabase.table("modules")\
-        .select("*, lessons(*, tasks(*))")\
-        .eq("course_id", course_id)\
-        .order("sequence_order")\
-        .execute().data or []
+    # 1. Fetch modules
+    modules_res = supabase.table("modules").select("*").eq("course_id", course_id).execute()
+    modules = modules_res.data or []
+    modules.sort(key=lambda x: x.get("sequence_order") or x.get("order_index") or 0)
+    module_ids = [m["id"] for m in modules]
     
+    if not module_ids:
+        return {**course, "modules": []}
+
+    # 2. Fetch topics and student data in parallel safely
+    import asyncio
+    async def fetch_parallel():
+        t_task = asyncio.to_thread(lambda: supabase.table("topics").select("*").in_("module_id", module_ids).execute().data or [])
+        if user["role"] == "student":
+            p_task = asyncio.to_thread(lambda: supabase.table("student_progress").select("*").eq("student_id", user["id"]).execute().data or [])
+            sub_task = asyncio.to_thread(lambda: supabase.table("submissions").select("*").eq("student_id", user["id"]).execute().data or [])
+            return await asyncio.gather(t_task, p_task, sub_task)
+        else:
+            return await asyncio.gather(t_task)
+
+    results = await fetch_parallel()
+    all_topics = results[0]
+    all_topics.sort(key=lambda x: x.get("sequence_order") or x.get("order_index") or 0)
+    
+    progress_res = results[1] if len(results) > 1 else []
+    sub_res = results[2] if len(results) > 2 else []
+
+    # 3. Fetch subtopics
+    topic_ids = [t["id"] for t in all_topics]
+    all_subtopics = []
+    if topic_ids:
+        st_res = supabase.table("subtopics").select("*, tasks(*)").in_("topic_id", topic_ids).execute()
+        all_subtopics = st_res.data or []
+        all_subtopics.sort(key=lambda x: x.get("sequence_order") or x.get("order_index") or 0)
+
+    # 4. Grouping logic
+    sub_by_topic = {}
+    for s in all_subtopics:
+        s["task"] = s.get("tasks", [])[0] if s.get("tasks") else None
+        tid = s["topic_id"]
+        if tid not in sub_by_topic: sub_by_topic[tid] = []
+        sub_by_topic[tid].append(s)
+
+    topics_by_mod = {}
+    for t in all_topics:
+        mid = t["module_id"]
+        if mid not in topics_by_mod: topics_by_mod[mid] = []
+        t["subtopics"] = sub_by_topic.get(t["id"], [])
+        topics_by_mod[mid].append(t)
+
+    # 5. Final Assembly and Progress Logic
+    progress_set = {p["subtopic_id"] for p in progress_res if p.get("subtopic_id")}
+    sub_map = {s["subtopic_id"]: s for s in sub_res if s.get("subtopic_id")}
+
+    ordered_topics = []
+    for m in modules:
+        m["topics"] = topics_by_mod.get(m["id"], [])
+        ordered_topics.extend(m["topics"])
+
     if user["role"] == "student":
-        # Bulk fetch all relevant student data for this user
-        progress_res = supabase.table("student_progress").select("*").eq("student_id", user["id"]).eq("is_completed", True).execute().data or []
-        progress_set = {p["lesson_id"] for p in progress_res}
-        
-        sub_res = supabase.table("submissions").select("*").eq("student_id", user["id"]).execute().data or []
-        # Get latest submission per task
-        sub_map = {}
-        for s in sorted(sub_res, key=lambda x: x.get("submitted_at") or x.get("created_at") or ""):
-            sub_map[s["task_id"]] = s
-            
-        lc_res = supabase.table("lesson_completions").select("lesson_id").eq("student_id", user["id"]).execute().data or []
-        lc_set = {lc["lesson_id"] for lc in lc_res}
-
-        # Filter out unpublished lessons for students
-        for m in modules:
-            m["lessons"] = [l for l in m["lessons"] if l.get("is_published", True)]
-
-        # Flatten lessons for sequential unlock logic
-        ordered_lessons = []
-        for m in modules:
-            m["lessons"].sort(key=lambda l: l.get("sequence_order") or 0)
-            ordered_lessons.extend(m["lessons"])
-
-        # Calculate states in-memory
-        for i, l in enumerate(ordered_lessons):
-            l["task"] = l["tasks"][0] if l.get("tasks") else None
-            
-            # 1. Completion State
-            if l["task"]:
-                submission = sub_map.get(l["task"]["id"])
-                l["submission"] = submission
-                l["completed"] = (submission and submission["status"] == "approved")
-            else:
-                l["submission"] = None
-                l["completed"] = (l["id"] in progress_set or l["id"] in lc_set)
-
-            # 2. Unlock State (Sequential)
+        for i, t in enumerate(ordered_topics):
+            # 1. Topic unlocking logic
             if i == 0:
-                l["unlocked"] = True
+                t["unlocked"] = True
             else:
-                prev = ordered_lessons[i-1]
-                # A lesson is unlocked IF:
-                # - The previous lesson is NOT mandatory
-                # - OR the previous lesson is completed
-                # - OR the previous lesson has no task (and isn't explicitly marked mandatory)
-                is_prev_mandatory = prev.get("is_mandatory", True)
-                l["unlocked"] = (not is_prev_mandatory) or prev.get("completed", False) or (prev["id"] in progress_set) or (not prev.get("tasks"))
-
+                prev_t = ordered_topics[i-1]
+                t["unlocked"] = all(s.get("completed", False) for s in prev_t.get("subtopics", []))
+            
+            # 2. Subtopic unlocking logic (Sequential within the topic)
+            subs = t.get("subtopics", [])
+            for j, s in enumerate(subs):
+                s["completed"] = s["id"] in progress_set
+                s["submission"] = sub_map.get(s["id"])
+                
+                if j == 0:
+                    s["unlocked"] = t.get("unlocked", False)
+                else:
+                    prev_s = subs[j-1]
+                    s["unlocked"] = prev_s.get("completed", False) and t.get("unlocked", False)
+            
+            t["completed"] = all(s.get("completed", False) for s in subs) if subs else False
     else:
-        # Admins/Mentors see everything
-        for m in modules:
-            m["lessons"].sort(key=lambda l: l.get("sequence_order") or 0)
-            for l in m["lessons"]:
-                l["task"] = l["tasks"][0] if l.get("tasks") else None
-                l["unlocked"] = True
-                l["completed"] = False
-                l["submission"] = None
+        # Mentors/Admins
+        for t in ordered_topics:
+            t["unlocked"] = True
+            t["completed"] = False
+            for s in t.get("subtopics", []):
+                s["unlocked"] = True
+                s["completed"] = False
+                s["submission"] = None
 
     course["modules"] = modules
     return course

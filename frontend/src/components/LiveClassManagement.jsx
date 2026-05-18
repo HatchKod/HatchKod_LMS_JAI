@@ -28,18 +28,34 @@ import {
   XCircle,
   ExternalLink,
   Edit2,
-  PlayCircle
+  PlayCircle,
+  BookOpen
 } from "lucide-react";
 import { toast } from "sonner";
 import RecordingUpload from "./mentor/RecordingUpload";
 import SessionAttendance from "./mentor/SessionAttendance";
 import { Users } from "lucide-react";
 
+const formatVideoUrl = (url) => {
+  if (!url) return null;
+  try {
+    const urlObj = new URL(url);
+    if (urlObj.hostname.includes("youtube.com") && urlObj.searchParams.has("v")) {
+      return `https://www.youtube.com/embed/${urlObj.searchParams.get("v")}`;
+    }
+    if (urlObj.hostname.includes("youtu.be")) {
+      return `https://www.youtube.com/embed${urlObj.pathname}`;
+    }
+    return url;
+  } catch (e) {
+    return url;
+  }
+};
+
 export default function LiveClassManagement({ role, userId }) {
   const navigate = useNavigate();
   const [classes, setClasses] = useState([]);
   const [batches, setBatches] = useState([]);
-  const [topics, setTopics] = useState([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -49,7 +65,7 @@ export default function LiveClassManagement({ role, userId }) {
   const timeInputRef = useRef(null);
   const [form, setForm] = useState({
     batch_id: "",
-    lesson_id: "",
+    topic_id: "",
     custom_topic: "",
     date: "",
     time: "",
@@ -59,7 +75,7 @@ export default function LiveClassManagement({ role, userId }) {
   const load = async () => {
     try {
       const [resClasses, resBatches] = await Promise.all([
-        api.get("/live-classes"),
+        api.get("/batches/sessions"),
         role === "mentor" ? api.get("/batches/mentor").catch(() => ({ data: [] })) : Promise.resolve({ data: [] })
       ]);
       setClasses(resClasses.data);
@@ -73,15 +89,7 @@ export default function LiveClassManagement({ role, userId }) {
 
   useEffect(() => { load(); }, []);
 
-  useEffect(() => {
-    if (form.batch_id) {
-      api.get(`/batches/${form.batch_id}/lessons`)
-        .then(res => setTopics(res.data))
-        .catch(() => setTopics([]));
-    } else {
-      setTopics([]);
-    }
-  }, [form.batch_id]);
+
 
   const openEdit = (c) => {
     setEditingId(c.id);
@@ -93,7 +101,7 @@ export default function LiveClassManagement({ role, userId }) {
 
     setForm({
       batch_id: c.batch_id || "",
-      lesson_id: c.lesson_id || "",
+      topic_id: c.topic_id || "",
       custom_topic: c.custom_topic || "",
       date: localDate,
       time: localTime,
@@ -120,7 +128,7 @@ export default function LiveClassManagement({ role, userId }) {
       }
       const payload = {
         batch_id: form.batch_id,
-        lesson_id: form.lesson_id || null,
+        topic_id: form.topic_id || null,
         custom_topic: form.custom_topic || null,
         scheduled_at: dateObj.toISOString(),
         meeting_url: form.meeting_url || null
@@ -143,7 +151,7 @@ export default function LiveClassManagement({ role, userId }) {
       }
       setIsModalOpen(false);
       setEditingId(null);
-      setForm({ batch_id: "", lesson_id: "", custom_topic: "", date: "", time: "", meeting_url: "" });
+      setForm({ batch_id: "", topic_id: "", custom_topic: "", date: "", time: "", meeting_url: "" });
       load();
     } catch (e) {
       console.error("Full error object captured in handleSchedule:", e);
@@ -374,6 +382,8 @@ export default function LiveClassManagement({ role, userId }) {
                   {batches.map(b => <option key={b.id} value={b.id}>{b.name} — {b.course_title}</option>)}
                 </select>
               </div>
+
+
 
               {/* Custom Title Input */}
               <div className="space-y-2">

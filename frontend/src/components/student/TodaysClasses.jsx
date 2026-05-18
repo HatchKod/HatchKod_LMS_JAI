@@ -42,8 +42,6 @@ export default function TodaysClasses() {
       const now = new Date();
       const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
-      const endOfNextWeek = new Date(startOfToday.getTime() + 7 * 24 * 60 * 60 * 1000);
-
       const todayList = data
         .filter(s => {
           const sDate = new Date(s.scheduled_at);
@@ -54,7 +52,7 @@ export default function TodaysClasses() {
       const upcomingList = data
         .filter(s => {
           const sDate = new Date(s.scheduled_at);
-          return sDate > endOfToday && sDate <= endOfNextWeek && s.status === 'scheduled';
+          return sDate > endOfToday && s.status === 'scheduled';
         })
         .sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at));
 
@@ -130,10 +128,8 @@ export default function TodaysClasses() {
     };
   }, [batchId]);
 
-  // 3. Polling Fallback
+  // 3. Polling Fallback (Always run to ensure reliability)
   useEffect(() => {
-    if (realtimeConnected) return;
-
     const interval = setInterval(async () => {
       for (const s of sessions) {
         if (s.status !== 'ended') {
@@ -141,7 +137,7 @@ export default function TodaysClasses() {
             const { data: statusRes } = await api.get(`/sessions/${s.id}/status`);
             if (statusRes.status !== s.status) {
               setSessions(prev => prev.map(item => 
-                item.id === s.id ? { ...item, status: statusRes.status, meeting_url: statusRes.meeting_url } : item
+                item.id === s.id ? { ...item, status: statusRes.status, meeting_url: statusRes.meeting_url, started_at: statusRes.started_at } : item
               ));
             }
           } catch {}
@@ -162,13 +158,7 @@ export default function TodaysClasses() {
       const { data } = await api.post(`/sessions/${sessionId}/join`);
       if (data.meeting_url) {
         window.open(data.meeting_url, '_blank');
-        if (data.is_late) {
-          toast.warning("You joined late — attendance marked as late", { duration: 6000 });
-        } else {
-          toast.success("Joining class! Good luck 🎯", { duration: 4000 });
-        }
-      } else {
-        // Handled below button
+        toast.success("Joining class! Good luck 🎯", { duration: 4000 });
       }
     } catch (e) {
       if (e.response?.status === 400) {
@@ -218,7 +208,7 @@ export default function TodaysClasses() {
           {upcomingSessions.length > 0 ? (
             upcomingSessions.map(s => <UpcomingRow key={s.id} session={s} />)
           ) : (
-            <p className="text-xs text-slate-400 italic">No upcoming classes this week</p>
+            <p className="text-xs text-slate-400 italic">No upcoming classes scheduled</p>
           )}
           <div className="sm:hidden mt-4">
             <button className="text-[10px] font-bold text-[#194BFB] uppercase tracking-widest">See all classes →</button>
@@ -368,7 +358,7 @@ function UpcomingRow({ session }) {
         <div className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter mt-0.5">{month}</div>
       </div>
       <div className="flex-1 min-w-0">
-        <h5 className="text-sm font-semibold text-slate-700 truncate">{session.topic_title}</h5>
+        <h5 className="text-sm font-semibold text-slate-700 truncate">{session.custom_topic || session.topic_title || "Live Class"}</h5>
         <div className="text-[10px] text-slate-400 flex items-center gap-2 font-medium">
           <span className="text-[#194BFB] font-bold">{session.batch_name}</span>
           <span className="w-1 h-1 rounded-full bg-slate-300" />

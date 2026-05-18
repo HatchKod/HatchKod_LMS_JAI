@@ -109,11 +109,10 @@ export default function MentorProgress({ batches = [] }) {
         {/* Header */}
         <div className="grid grid-cols-12 gap-2 px-4 py-2 bg-slate-50 border-b border-slate-100">
           <div className="col-span-4 text-[10px] uppercase tracking-wider text-slate-400 font-bold">Student</div>
-          <div className="col-span-1 text-[10px] uppercase tracking-wider text-slate-400 font-bold text-center">Done</div>
-          <div className="col-span-1 text-[10px] uppercase tracking-wider text-slate-400 font-bold text-center">Total</div>
+          <div className="col-span-3 text-[10px] uppercase tracking-wider text-slate-400 font-bold text-center">Course Done</div>
           <div className="col-span-3 text-[10px] uppercase tracking-wider text-slate-400 font-bold">Progress</div>
-          <div className="col-span-2 text-[10px] uppercase tracking-wider text-slate-400 font-bold">Time</div>
-          <div className="col-span-1 text-[10px] uppercase tracking-wider text-slate-400 font-bold">Action</div>
+          <div className="col-span-1 text-[10px] uppercase tracking-wider text-slate-400 font-bold text-center">Time</div>
+          <div className="col-span-1 text-[10px] uppercase tracking-wider text-slate-400 font-bold text-right">Action</div>
         </div>
 
         {loading ? (
@@ -121,7 +120,7 @@ export default function MentorProgress({ batches = [] }) {
         ) : progress.length === 0 ? (
           <div className="p-10 text-center">
             <p className="text-sm text-slate-500 font-medium">No progress data yet.</p>
-            <p className="text-xs text-slate-400 mt-1">Students need to mark lessons complete for data to appear.</p>
+            <p className="text-xs text-slate-400 mt-1">Students need to mark topics complete for data to appear.</p>
           </div>
         ) : (
           progress.map((row) => (
@@ -137,11 +136,10 @@ export default function MentorProgress({ batches = [] }) {
                 <span className="text-sm truncate text-slate-700">{row.student_name}</span>
               </div>
 
-              {/* Completed */}
-              <div className="col-span-1 text-sm text-center font-medium text-slate-700">{row.completed_lessons}</div>
-
-              {/* Total */}
-              <div className="col-span-1 text-sm text-center text-slate-400">{row.total_lessons}</div>
+              {/* Course Done */}
+              <div className="col-span-3 text-sm text-center font-bold text-slate-600">
+                {row.completed_topics} / {row.total_topics}
+              </div>
 
               {/* Progress */}
               <div className="col-span-3 flex items-center gap-2">
@@ -150,12 +148,12 @@ export default function MentorProgress({ batches = [] }) {
               </div>
 
               {/* Time */}
-              <div className="col-span-2 text-xs text-slate-400">
-                {row.total_time_spent_minutes > 0 ? `${row.total_time_spent_minutes} min` : "—"}
+              <div className="col-span-1 text-xs text-center text-slate-400">
+                {row.total_time_spent_minutes > 0 ? `${row.total_time_spent_minutes}m` : "—"}
               </div>
 
               {/* Action */}
-              <div className="col-span-1">
+              <div className="col-span-1 text-right">
                 <button
                   onClick={() => navigate(`/admin/students/${row.student_id}/progress?batchId=${selectedBatchId}`)}
                   className="text-xs border border-slate-200 rounded-sm px-2 py-1 text-slate-600 hover:border-[#194BFB] hover:text-[#194BFB] transition-colors"

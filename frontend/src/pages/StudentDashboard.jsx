@@ -96,8 +96,10 @@ export default function StudentDashboard() {
           <MyAttendance />
         </div>
 
-        {data.next_lesson && activeTab === "inprogress" && (() => {
-          const pending = data.pending_submissions.find(s => s.lesson_id === data.next_lesson.lesson.id);
+        {data.next_topic && activeTab === "inprogress" && (() => {
+          const pending = (data.pending_submissions || []).find(s => s.topic_id === data.next_topic.topic.id);
+          const nextSubtopicId = data.next_topic.subtopic?.id;
+          
           return (
             <div className="mb-12">
               <div className="text-[10px] uppercase tracking-[0.22em] text-slate-400 font-bold mb-4">CONTINUE LEARNING</div>
@@ -113,15 +115,15 @@ export default function StudentDashboard() {
                       ) : (
                         <StatusPill status="ready_to_build" />
                       )}
-                      <span className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">{data.next_lesson.course.title}</span>
+                      <span className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">{data.next_topic.course.title}</span>
                     </div>
-                    <div className="font-[Outfit] text-2xl font-bold tracking-tight text-slate-900" data-testid="next-lesson-title">
-                      {data.next_lesson.lesson.title}
+                    <div className="font-[Outfit] text-2xl font-bold tracking-tight text-slate-900" data-testid="next-topic-title">
+                      {data.next_topic.topic.title}
                     </div>
                     <p className="mt-2 text-sm text-slate-500 line-clamp-1 italic">"The only way to learn a new programming language is by writing programs in it."</p>
                     <Button asChild className={`mt-8 rounded-sm px-8 h-12 ${pending ? 'bg-slate-100 text-slate-900 hover:bg-slate-200 shadow-none border border-slate-200' : 'bg-[#194BFB] hover:bg-[#0F3AE5]'}`} data-testid="continue-learning-btn">
-                      <Link to={`/lesson/${data.next_lesson.lesson.id}`}>
-                        {pending ? "View Submission" : "Resume Lesson"} <ArrowRight className="ml-2 h-4 w-4" />
+                      <Link to={nextSubtopicId ? `/subtopic/${nextSubtopicId}` : `/course/${data.next_topic.course.id}`}>
+                        {pending ? "View Submission" : "Resume Learning"} <ArrowRight className="ml-2 h-4 w-4" />
                       </Link>
                     </Button>
                   </div>
@@ -130,7 +132,7 @@ export default function StudentDashboard() {
                     <div className={`${pending ? 'text-amber-400' : 'text-emerald-400'} mt-1`}>▸ {pending ? 'pending_approval' : 'ready_to_build'}</div>
                     <div className="text-slate-500 mt-4">// next_execution</div>
                     <div className="text-[#9bb6ff] mt-1 italic cursor-pointer hover:underline">
-                      {pending ? 'wait_for_mentor()' : `open_lesson("${data.next_lesson.lesson.title.toLowerCase().replace(/ /g, "_")}")`}
+                      {pending ? 'wait_for_mentor()' : `open_topic("${data.next_topic.topic.title.toLowerCase().replace(/ /g, "_")}")`}
                     </div>
                     <div className="mt-8 pt-4 border-t border-white/10 flex items-center gap-2 text-slate-400">
                       <div className={`h-2 w-2 rounded-full ${pending ? 'bg-amber-500' : 'bg-emerald-500'} animate-pulse`}></div>
@@ -150,7 +152,7 @@ export default function StudentDashboard() {
         </div>
 
         <div className="grid grid-cols-1 gap-6">
-          {currentCourses.map(({ course, progress, completed_lessons, total_lessons, module_count }) => (
+          {currentCourses.map(({ course, progress, completed_topics, total_topics, module_count }) => (
             <Card key={course.id} className="rounded-sm border-border bg-white p-0 overflow-hidden shadow-sm hover:shadow-md transition-shadow group" data-testid={`course-card-${course.id}`}>
               <div className="flex flex-col md:flex-row">
                 {/* Left Side: Course Info */}
@@ -162,7 +164,7 @@ export default function StudentDashboard() {
                           {course.status}
                         </span>
                         <span className="text-[9px] uppercase tracking-[0.2em] font-bold text-slate-400">
-                          {module_count} Modules • {total_lessons} Lessons
+                          {module_count} Modules • {total_topics} Topics
                         </span>
                       </div>
                       <h3 className="font-[Outfit] text-2xl font-bold text-slate-900 group-hover:text-[#194BFB] transition-colors">{course.title}</h3>
@@ -202,7 +204,7 @@ export default function StudentDashboard() {
                     </div>
                     <Progress value={progress} className="h-2 rounded-full bg-slate-200" />
                     <div className="mt-2 text-[10px] text-right text-slate-400 font-medium">
-                      {completed_lessons} of {total_lessons} tasks approved
+                      {completed_topics} of {total_topics} topics approved
                     </div>
                   </div>
 
@@ -236,14 +238,14 @@ export default function StudentDashboard() {
           Pending Submissions
         </h2>
         <div className="bg-white border border-border rounded-sm overflow-hidden shadow-sm">
-          {data.pending_submissions.length === 0 ? (
+          {(data.pending_submissions || []).length === 0 ? (
             <div className="p-12 text-center text-sm text-slate-400 italic" data-testid="no-pending">All caught up. Nothing pending.</div>
           ) : (
             data.pending_submissions.map((s) => (
-              <Link key={s.id} to={`/lesson/${s.lesson_id}`}
+              <Link key={s.id} to={`/subtopic/${s.topic_id}`}
                 className="flex items-center justify-between p-5 border-b last:border-b-0 border-border hover:bg-slate-50 transition-colors group" data-testid={`pending-row-${s.id}`}>
                 <div>
-                  <div className="font-bold text-slate-800 group-hover:text-[#194BFB]">{s.lesson?.title || "Lesson"}</div>
+                  <div className="font-bold text-slate-800 group-hover:text-[#194BFB]">{s.topic?.title || "Topic"}</div>
                   <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-1">submitted {new Date(s.submitted_at).toLocaleString()}</div>
                 </div>
                 <StatusPill status={s.status} />
