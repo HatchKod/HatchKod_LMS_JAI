@@ -42,6 +42,7 @@ import {
 import { Separator } from "../components/ui/separator";
 import { ScrollArea } from "../components/ui/scroll-area";
 import { Badge } from "../components/ui/badge";
+import MDEditor from "@uiw/react-md-editor";
 
 export default function AdminCourseEditor() {
   const { id } = useParams();
@@ -539,11 +540,11 @@ export default function AdminCourseEditor() {
                             <Label className="text-[10px] uppercase font-bold tracking-widest text-slate-400">Subtopic Content (Markdown supported)</Label>
                             <span className="text-[10px] text-slate-400">Use --- to split content into multiple pages</span>
                           </div>
-                          <Textarea 
-                            className="min-h-[400px] font-mono text-sm border-slate-200 focus:border-[#194BFB] p-4 bg-slate-50/50 rounded-sm"
+                          <MDEditor 
+                            height={500}
                             value={selectedSubtopic.content_html || ""}
-                            onChange={(e) => setSelectedSubtopic({ ...selectedSubtopic, content_html: e.target.value })}
-                            placeholder="# Welcome to Java\n\nPaste your markdown content here..."
+                            onChange={(val) => setSelectedSubtopic({ ...selectedSubtopic, content_html: val || "" })}
+                            preview="edit"
                           />
                         </div>
                         <Button 
