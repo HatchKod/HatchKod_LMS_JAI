@@ -62,6 +62,7 @@ export default function AdminCourseEditor() {
   const [showDeleteSubtopicModal, setShowDeleteSubtopicModal] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [saving, setSaving] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   // Fetch full course data
   const fetchData = useCallback(async () => {
@@ -107,7 +108,8 @@ export default function AdminCourseEditor() {
 
   // --- Module Actions ---
   const handleAddModule = async () => {
-    if (!newTitle.trim()) return;
+    if (!newTitle.trim() || isSaving) return;
+    setIsSaving(true);
     try {
       const res = await api.post(`/admin/courses/${id}/modules`, { 
         title: newTitle, 
@@ -120,6 +122,8 @@ export default function AdminCourseEditor() {
       setNewTitle("");
     } catch (e) {
       toast.error("Failed to add module");
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -138,7 +142,8 @@ export default function AdminCourseEditor() {
 
   // --- Topic Actions ---
   const handleAddTopic = async () => {
-    if (!newTitle.trim() || !activeModuleId) return;
+    if (!newTitle.trim() || !activeModuleId || isSaving) return;
+    setIsSaving(true);
     try {
       const module = modules.find(m => m.id === activeModuleId);
       const res = await api.post(`/admin/modules/${activeModuleId}/topics`, { 
@@ -154,6 +159,8 @@ export default function AdminCourseEditor() {
       setNewTitle("");
     } catch (e) {
       toast.error("Failed to add topic");
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -190,7 +197,8 @@ export default function AdminCourseEditor() {
   };
 
   const handleAddSubtopic = async () => {
-    if (!newTitle.trim() || !activeTopicId) return;
+    if (!newTitle.trim() || !activeTopicId || isSaving) return;
+    setIsSaving(true);
     try {
       const res = await api.post(`/admin/topics/${activeTopicId}/subtopics`, { 
         title: newTitle, 
@@ -215,6 +223,8 @@ export default function AdminCourseEditor() {
       setNewTitle("");
     } catch (e) {
       toast.error("Failed to add subtopic");
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -692,21 +702,24 @@ export default function AdminCourseEditor() {
           <DialogHeader>
             <DialogTitle className="font-[Outfit] font-extrabold text-xl">New Module</DialogTitle>
           </DialogHeader>
-          <div className="py-4">
-            <Label className="text-[10px] uppercase font-bold text-slate-400 tracking-widest mb-2 block">Module Title</Label>
-            <Input 
-              value={newTitle} 
-              onChange={(e) => setNewTitle(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleAddModule()}
-              placeholder="e.g. Getting Started with Java"
-              autoFocus
-              className="rounded-sm h-11"
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setShowModuleModal(false)} className="rounded-sm font-bold">Cancel</Button>
-            <Button onClick={handleAddModule} disabled={!newTitle.trim()} className="bg-[#194BFB] hover:bg-[#0F3AE5] text-white rounded-sm font-bold px-8 shadow-lg shadow-blue-100">Create Module</Button>
-          </DialogFooter>
+          <form onSubmit={(e) => { e.preventDefault(); handleAddModule(); }}>
+            <div className="py-4">
+              <Label className="text-[10px] uppercase font-bold text-slate-400 tracking-widest mb-2 block">Module Title</Label>
+              <Input 
+                value={newTitle} 
+                onChange={(e) => setNewTitle(e.target.value)}
+                placeholder="e.g. Getting Started with Java"
+                autoFocus
+                className="rounded-sm h-11"
+              />
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="ghost" onClick={() => setShowModuleModal(false)} className="rounded-sm font-bold">Cancel</Button>
+              <Button type="submit" disabled={!newTitle.trim() || isSaving} className="bg-[#194BFB] hover:bg-[#0F3AE5] text-white rounded-sm font-bold px-8 shadow-lg shadow-blue-100">
+                {isSaving ? "Creating..." : "Create Module"}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 
@@ -716,21 +729,24 @@ export default function AdminCourseEditor() {
           <DialogHeader>
             <DialogTitle className="font-[Outfit] font-extrabold text-xl">New Topic</DialogTitle>
           </DialogHeader>
-          <div className="py-4">
-            <Label className="text-[10px] uppercase font-bold text-slate-400 tracking-widest mb-2 block">Topic Title</Label>
-            <Input 
-              value={newTitle} 
-              onChange={(e) => setNewTitle(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleAddTopic()}
-              placeholder="e.g. Variables and Data Types"
-              autoFocus
-              className="rounded-sm h-11"
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setShowTopicModal(false)} className="rounded-sm font-bold">Cancel</Button>
-            <Button onClick={handleAddTopic} disabled={!newTitle.trim()} className="bg-[#194BFB] hover:bg-[#0F3AE5] text-white rounded-sm font-bold px-8 shadow-lg shadow-blue-100">Create Topic</Button>
-          </DialogFooter>
+          <form onSubmit={(e) => { e.preventDefault(); handleAddTopic(); }}>
+            <div className="py-4">
+              <Label className="text-[10px] uppercase font-bold text-slate-400 tracking-widest mb-2 block">Topic Title</Label>
+              <Input 
+                value={newTitle} 
+                onChange={(e) => setNewTitle(e.target.value)}
+                placeholder="e.g. Variables and Data Types"
+                autoFocus
+                className="rounded-sm h-11"
+              />
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="ghost" onClick={() => setShowTopicModal(false)} className="rounded-sm font-bold">Cancel</Button>
+              <Button type="submit" disabled={!newTitle.trim() || isSaving} className="bg-[#194BFB] hover:bg-[#0F3AE5] text-white rounded-sm font-bold px-8 shadow-lg shadow-blue-100">
+                {isSaving ? "Creating..." : "Create Topic"}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 
@@ -740,21 +756,24 @@ export default function AdminCourseEditor() {
           <DialogHeader>
             <DialogTitle className="font-[Outfit] font-extrabold text-xl">New Subtopic</DialogTitle>
           </DialogHeader>
-          <div className="py-4">
-            <Label className="text-[10px] uppercase font-bold text-slate-400 tracking-widest mb-2 block">Subtopic Title</Label>
-            <Input 
-              value={newTitle} 
-              onChange={(e) => setNewTitle(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleAddSubtopic()}
-              placeholder="e.g. Primitive vs Reference Types"
-              autoFocus
-              className="rounded-sm h-11"
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setShowSubtopicModal(false)} className="rounded-sm font-bold">Cancel</Button>
-            <Button onClick={handleAddSubtopic} disabled={!newTitle.trim()} className="bg-[#194BFB] hover:bg-[#0F3AE5] text-white rounded-sm font-bold px-8 shadow-lg shadow-blue-100">Create Subtopic</Button>
-          </DialogFooter>
+          <form onSubmit={(e) => { e.preventDefault(); handleAddSubtopic(); }}>
+            <div className="py-4">
+              <Label className="text-[10px] uppercase font-bold text-slate-400 tracking-widest mb-2 block">Subtopic Title</Label>
+              <Input 
+                value={newTitle} 
+                onChange={(e) => setNewTitle(e.target.value)}
+                placeholder="e.g. Primitive vs Reference Types"
+                autoFocus
+                className="rounded-sm h-11"
+              />
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="ghost" onClick={() => setShowSubtopicModal(false)} className="rounded-sm font-bold">Cancel</Button>
+              <Button type="submit" disabled={!newTitle.trim() || isSaving} className="bg-[#194BFB] hover:bg-[#0F3AE5] text-white rounded-sm font-bold px-8 shadow-lg shadow-blue-100">
+                {isSaving ? "Creating..." : "Create Subtopic"}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 
