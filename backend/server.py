@@ -1263,12 +1263,15 @@ async def complete_subtopic(subtopic_id: str, payload: TopicCompleteIn, user: di
     }).execute()
 
     # Record time spent (legacy/analytics)
-    supabase.table("subtopic_completions").upsert({
-        "student_id": user["id"],
-        "subtopic_id": subtopic_id,
-        "time_spent_minutes": payload.time_spent_minutes,
-        "completed_at": iso(now_utc())
-    }).execute()
+    try:
+        supabase.table("subtopic_completions").upsert({
+            "student_id": user["id"],
+            "subtopic_id": subtopic_id,
+            "time_spent_minutes": payload.time_spent_minutes,
+            "completed_at": iso(now_utc())
+        }).execute()
+    except Exception as e:
+        logger.error(f"Error recording time spent in subtopic_completions: {e}")
     
     # Award XP
     try:

@@ -27,18 +27,22 @@ Key tables and their primary roles:
 - `users`: Core user data including `total_xp`, `level`, `current_streak`, and `assigned_mentor_id`.
 - `batches`: Grouping of students for specific courses and mentors.
 - `batch_students`: Mapping table for student-to-batch enrollment.
-- `courses`, `modules`, `lessons`, `tasks`: The content hierarchy.
+- `courses`, `modules`, `topics`, `subtopics`, `tasks`: The 3-level content hierarchy.
 - `submissions`: Records student task submissions (GitHub URLs or file paths) and mentor feedback/status.
-- `student_progress`: Tracks completion of lessons to handle the locking/unlocking logic.
+- `student_progress`: Tracks completion of subtopics (`is_completed = True`) to handle the locking/unlocking logic at the topic level.
+- `subtopic_completions`: Tracks completion of subtopics, time spent (for analytics), and completion timestamps.
+- `user_activity`: Stores granular logs of student activities (e.g., lesson completed, project approved, problem solved) and awarded XP.
+- `leaderboard_weekly`: Tracks student XP earned on a week-by-week basis to support the leaderboard ranking.
 - `class_sessions`: Manages the lifecycle of live classes.
-- `attendance`: Tracks student join times and "late" status for live classes.
+- `recordings`: Tracks session recordings uploaded by mentors.
+- `attendance`: Tracks student attendance statuses (`present`, `absent`, `late`) for class sessions.
 - `problems`, `test_cases`, `problem_submissions`: Support for the coding challenge library.
 - `notifications`: Stores broadcast and automated alerts.
 
 ### Business Logic & Code Execution
-- **Sequential Unlocking**: `is_lesson_unlocked` helper verifies that Lesson N-1's task is `approved` before allowing access to Lesson N.
+- **Sequential Unlocking**: `is_topic_unlocked` helper verifies that Topic N-1 is complete before allowing access to Topic N. A Topic N-1 is complete when all its mandatory subtopics are finished (`is_completed = True` in `student_progress`). Subtopics with tasks are completed when their submissions are approved by a mentor; subtopics without tasks can be completed manually by students.
 - **Gamification Engine**:
-    - `award_xp`: Calculates and updates XP based on actions (Lesson: 20, Quiz: 40, Problem: 50, Project: 150).
+    - `award_xp`: Calculates and updates XP based on actions (`lesson_completed`: 20 XP, `quiz_passed`: 40 XP, `problem_solved`: 50 XP, `project_approved`: 150 XP).
     - `sync_student_xp`: A retroactive sync utility that ensures a student's XP matches their approved work history.
 - **Judge0 Proxy (Multi-language Potential)**:
     - **Current Focus**: The `/api/execute` (Playground) is hardcoded to Java.
@@ -49,16 +53,17 @@ Key tables and their primary roles:
 ## 3. Key Workflows
 
 ### Live Class Lifecycle
-1. **Scheduling**: Mentor creates a session in a specific batch.
+1. **Scheduling**: Mentor schedules a live session for a batch.
 2. **Start**: Mentor clicks "Start Class" → Session status becomes `live` → Automated notifications sent to all batch students.
-3. **Joining**: Students join via the dashboard; the system logs their `joined_at` time and marks them `is_late` if they join 10+ minutes after the start.
-4. **Ending**: Mentor ends class → Session status becomes `ended` → System backfills `absent` status for students who didn't join.
-5. **Recording**: Mentor uploads a recording URL → Students receive a "Recording Available" notification.
+3. **Joining**: Students join the class via the dashboard link. Note: The app does not log real-time attendance upon joining; Google Meet attendance reports are the sole source of truth.
+4. **Ending**: Mentor ends class → Session status becomes `ended` → The system automatically creates a recording entry and backfills "absent" status for all batch students who haven't yet been marked.
+5. **Attendance Upload**: Mentor/Admin uploads a Google Meet CSV/HTML report. The system parses it, performs fuzzy matching on student names/emails (exact, word-order independent, or Levenshtein distance), calculates attendance based on percentage of time spent ($\ge 75\%$ duration), and allows mentors to review, override, and bulk-save attendance.
+6. **Recording**: After the class ends, the recording is made available, and students receive automated notifications.
 
 ### Task Review Flow
 - **Submission**: Students submit a GitHub URL or upload a ZIP/PDF to Supabase Storage.
 - **Review Scoping**: Mentors only see "Pending" submissions for students **assigned to them** or students who are currently **unassigned**.
-- **Approval**: If "Approved", the student receives XP and the next lesson is unlocked. If "Rework", the student must resubmit based on feedback.
+- **Approval**: If "Approved", the student's subtopic progress is marked complete, they receive 150 XP, and the next topic is unlocked (if all other mandatory subtopics in the current topic are complete). If "Rework", the student must resubmit based on feedback.
 
 ---
 
@@ -66,7 +71,7 @@ Key tables and their primary roles:
 
 ### State Management
 - **Philosophy**: Lightweight and dependency-free.
-- **Authentication**: Managed via a global `AuthContext` (`frontend/src/lib/auth.jsx`) which provides `user` and `loading` states.
+- **Authentication**: Managed via a global `AuthContext` (`frontend/src/lib/auth.jsx`) which provides `user`, `loading`, `login`, `register`, `logout`, and `refresh` functions.
 - **Application State**: Purely local `useState` and `useEffect` patterns. Data is fetched via Axios on a per-page/per-component basis. No Redux or Zustand is used.
 
 ### Design System
