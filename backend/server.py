@@ -16,10 +16,12 @@ import bcrypt
 import jwt
 import requests
 import httpx
-from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request, Response, BackgroundTasks, File, UploadFile
+from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request, Response, BackgroundTasks, File, UploadFile, Form
 from starlette.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, EmailStr
 from supabase import create_client
+import boto3
+from botocore.exceptions import ClientError
 
 load_dotenv()
 
@@ -563,6 +565,119 @@ async def update_password(payload: UpdatePasswordIn, user: dict = Depends(get_cu
     }).eq("id", user["id"]).execute()
     
     return {"ok": True, "message": "Password updated successfully"}
+
+
+# -------------------- S3 Image Library (Admin) --------------------
+AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
+AWS_S3_BUCKET = "hatchkod-course-images"
+AWS_S3_REGION = "ap-south-1"
+
+def get_s3_client():
+    if not AWS_ACCESS_KEY_ID or not AWS_SECRET_ACCESS_KEY:
+        raise HTTPException(status_code=500, detail="AWS credentials are not configured")
+    return boto3.client(
+        "s3",
+        aws_access_key_id=AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+        region_name=AWS_S3_REGION
+    )
+
+@api.post("/admin/images/upload")
+async def upload_admin_image(
+    file: UploadFile = File(...),
+    folder: Optional[str] = Form(None),
+    user: dict = Depends(require_roles("admin"))
+):
+    s3 = get_s3_client()
+    unique_id = str(uuid.uuid4())
+    if folder and folder.strip():
+        clean_folder = folder.strip("/")
+        unique_filename = f"{clean_folder}/{unique_id}_{file.filename}"
+    else:
+        file_ext = os.path.splitext(file.filename)[1]
+        unique_filename = f"{unique_id}{file_ext}"
+    
+    try:
+        s3.upload_fileobj(
+            file.file,
+            AWS_S3_BUCKET,
+            unique_filename,
+            ExtraArgs={"ContentType": file.content_type}
+        )
+        url = f"https://{AWS_S3_BUCKET}.s3.{AWS_S3_REGION}.amazonaws.com/{unique_filename}"
+        return {"url": url}
+    except ClientError as e:
+        logger.error(f"S3 upload error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to upload to S3: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected upload error: {e}")
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+
+@api.get("/admin/images")
+async def list_admin_images(
+    user: dict = Depends(require_roles("admin"))
+):
+    s3 = get_s3_client()
+    try:
+        response = s3.list_objects_v2(Bucket=AWS_S3_BUCKET)
+        urls = []
+        if "Contents" in response:
+            for obj in response["Contents"]:
+                key = obj["Key"]
+                if not key or key.endswith("/"):
+                    continue
+                # Only include valid image extensions
+                lower_key = key.lower()
+                if not any(lower_key.endswith(ext) for ext in [".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp"]):
+                    continue
+                
+                # Extract folder name
+                folder = ""
+                if "/" in key:
+                    folder = key.rsplit("/", 1)[0]
+                    
+                url = f"https://{AWS_S3_BUCKET}.s3.{AWS_S3_REGION}.amazonaws.com/{key}"
+                urls.append({
+                    "key": key,
+                    "url": url,
+                    "folder": folder,
+                    "uploaded_at": obj["LastModified"].isoformat() if "LastModified" in obj else None,
+                    "size": obj.get("Size", 0)
+                })
+        return urls
+    except ClientError as e:
+        logger.error(f"S3 list error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to list images: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected list error: {e}")
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+
+@api.get("/admin/images/folders")
+async def list_admin_image_folders(
+    user: dict = Depends(require_roles("admin"))
+):
+    s3 = get_s3_client()
+    try:
+        response = s3.list_objects_v2(Bucket=AWS_S3_BUCKET)
+        folders = set()
+        if "Contents" in response:
+            for obj in response["Contents"]:
+                key = obj["Key"]
+                if not key or key.endswith("/"):
+                    continue
+                lower_key = key.lower()
+                if not any(lower_key.endswith(ext) for ext in [".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp"]):
+                    continue
+                if "/" in key:
+                    folders.add(key.rsplit("/", 1)[0])
+        return sorted(list(folders))
+    except ClientError as e:
+        logger.error(f"S3 folders error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to list folders: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected S3 folders error: {e}")
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
 
 # -------------------- Courses (Admin) --------------------

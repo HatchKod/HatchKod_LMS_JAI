@@ -10,3 +10,5 @@ supabase
 pydantic
 email-validator
 python-multipart
+boto3
+

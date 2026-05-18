@@ -30,7 +30,8 @@ import {
   MessageCircle,
   Mail,
   Code2,
-  Trophy
+  Trophy,
+  Image
 } from "lucide-react";
 import { toast } from "sonner";
 import NotificationBell from "./NotificationBell";
@@ -130,17 +131,30 @@ export default function Navbar({ unreadCount }) {
                 Challenges
               </Link>
               {user.role === "admin" && (
-                <Link
-                  to="/admin/problems"
-                  className={`flex items-center gap-2 px-3 py-2 text-sm font-medium transition-colors rounded-md ${
-                    isActive("/admin/problems")
-                      ? "text-[#194BFB] bg-[#194BFB]/5"
-                      : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
-                  }`}
-                >
-                  <Code2 className="h-4 w-4" />
-                  Challenge Management
-                </Link>
+                <>
+                  <Link
+                    to="/admin/problems"
+                    className={`flex items-center gap-2 px-3 py-2 text-sm font-medium transition-colors rounded-md ${
+                      isActive("/admin/problems")
+                        ? "text-[#194BFB] bg-[#194BFB]/5"
+                        : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
+                    }`}
+                  >
+                    <Code2 className="h-4 w-4" />
+                    Challenge Management
+                  </Link>
+                  <Link
+                    to="/admin/images"
+                    className={`flex items-center gap-2 px-3 py-2 text-sm font-medium transition-colors rounded-md ${
+                      isActive("/admin/images")
+                        ? "text-[#194BFB] bg-[#194BFB]/5"
+                        : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
+                    }`}
+                  >
+                    <Image className="h-4 w-4" />
+                    Image Library
+                  </Link>
+                </>
               )}
             </nav>
           )}

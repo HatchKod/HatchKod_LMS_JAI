@@ -24,6 +24,7 @@ import ProfilePage from "./pages/ProfilePage";
 import Leaderboard from "./pages/Leaderboard";
 import TeachingMode from "./pages/TeachingMode";
 import StudentProgress from "./pages/StudentProgress";
+import ImageLibrary from "./pages/ImageLibrary";
 
 
 export default function App() {
@@ -87,6 +88,9 @@ export default function App() {
               } />
               <Route path="/admin/problems" element={
                 <ProtectedRoute roles={["admin"]}><ProblemManagementPage /></ProtectedRoute>
+              } />
+              <Route path="/admin/images" element={
+                <ProtectedRoute roles={["admin"]}><ImageLibrary /></ProtectedRoute>
               } />
             </Routes>
           </BrowserRouter>
