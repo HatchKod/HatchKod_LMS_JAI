@@ -151,13 +151,12 @@ export default function MentorAttendance({ forcedBatchId, onClose }) {
         </div>
       </div>
 
-      {/* Session Verification Portal */}
       <div className="bg-slate-50 border border-slate-200 rounded-sm p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="space-y-1">
           <p className="text-xs font-bold text-slate-700 flex items-center gap-2">
-            <UploadCloud className="h-4 w-4 text-[#194BFB]" /> Verify Individual Class Attendance
+            <UploadCloud className="h-4 w-4 text-[#194BFB]" /> Manage Class Attendance
           </p>
-          <p className="text-[10px] text-slate-500 font-medium">Select a past session to upload and sync its Google Meet call report.</p>
+          <p className="text-[10px] text-slate-500 font-medium">Attendance is synced automatically via the <b>HatchKod Chrome Extension</b>. Select a session to review or manually upload a CSV fallback.</p>
         </div>
 
         <div className="flex items-center gap-3">

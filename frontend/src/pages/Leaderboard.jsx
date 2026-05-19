@@ -62,7 +62,9 @@ export default function Leaderboard() {
               </div>
               <div>
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Your Streak</p>
-                <p className="text-2xl font-black text-slate-900 font-['Outfit']">{(data?.user_stats?.streak ?? user?.gamification?.streak) || 0} Days</p>
+                <p className="text-2xl font-black text-slate-900 font-['Outfit']">
+                  {((data?.user_stats?.streak ?? user?.gamification?.streak) || 0) === 1 ? "1 Day" : `${(data?.user_stats?.streak ?? user?.gamification?.streak) || 0} Days`}
+                </p>
               </div>
             </CardContent>
           </Card>
@@ -85,8 +87,8 @@ export default function Leaderboard() {
                 <Award className="h-6 w-6 text-emerald-500" />
               </div>
               <div>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Your Level</p>
                 <p className="text-2xl font-black text-slate-900 font-['Outfit']">Lvl {(data?.user_stats?.level ?? user?.gamification?.level) || 1}</p>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Your Level</p>
               </div>
             </CardContent>
           </Card>
@@ -112,9 +114,9 @@ export default function Leaderboard() {
               </div>
             ) : data?.leaderboard.length > 0 ? (
               <div className="divide-y divide-slate-50">
-                {data.leaderboard.map((entry) => (
+                {data.leaderboard.map((entry, idx) => (
                   <div 
-                    key={entry.rank} 
+                    key={idx} 
                     className={`flex items-center justify-between p-6 transition-colors ${entry.is_me ? 'bg-blue-50/50' : 'hover:bg-slate-50/50'}`}
                   >
                     <div className="flex items-center gap-6">

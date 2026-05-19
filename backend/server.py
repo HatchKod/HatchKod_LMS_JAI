@@ -489,6 +489,13 @@ class AttendanceOverrideIn(BaseModel):
 class BulkSaveAttendanceRequest(BaseModel):
     records: list[dict]
 
+class ExtensionParticipant(BaseModel):
+    name: str
+    duration_minutes: float
+
+class ExtensionSyncRequest(BaseModel):
+    participants: list[ExtensionParticipant]
+
 class BatchIn(BaseModel):
     name: str
     course_id: str
@@ -808,9 +815,9 @@ async def update_module_admin(module_id: str, payload: ModuleIn, _: dict = Depen
 
 @api.delete("/admin/modules/{module_id}")
 async def delete_module_admin(module_id: str, _: dict = Depends(require_roles("admin"))):
-    lessons = supabase.table("topics").select("id").eq("module_id", module_id).execute().data
-    if lessons:
-        raise HTTPException(400, "Delete all lessons in this module first.")
+    topics = supabase.table("topics").select("id").eq("module_id", module_id).execute().data
+    if topics:
+        raise HTTPException(400, "Delete all topics in this module first.")
     supabase.table("modules").delete().eq("id", module_id).execute()
     return {"ok": True}
 
@@ -820,7 +827,7 @@ async def reorder_modules_admin(payload: ReorderModulesIn, _: dict = Depends(req
         supabase.table("modules").update({"sequence_order": i}).eq("id", mid).execute()
     return {"ok": True}
 
-# --- Lesson Endpoints (Admin) ---
+# --- Topic Endpoints (Admin) ---
 
 @api.post("/admin/modules/{module_id}/topics")
 async def create_topic_admin(module_id: str, payload: TopicIn, _: dict = Depends(require_roles("admin"))):
@@ -849,7 +856,9 @@ async def update_topic_admin(topic_id: str, payload: TopicIn, _: dict = Depends(
 
 @api.delete("/admin/topics/{topic_id}")
 async def delete_topic_admin(topic_id: str, _: dict = Depends(require_roles("admin"))):
-    supabase.table("tasks").delete().eq("topic_id", topic_id).execute()
+    subtopics = supabase.table("subtopics").select("id").eq("topic_id", topic_id).execute().data
+    if subtopics:
+        raise HTTPException(400, "Delete all subtopics in this topic first.")
     supabase.table("topics").delete().eq("id", topic_id).execute()
     return {"ok": True}
 
@@ -1923,9 +1932,12 @@ async def get_all_sessions(user: dict = Depends(require_roles("mentor", "admin")
         else:
             return []
             
-    data = query.order("scheduled_at", desc=True).execute().data or []
+    data = query.execute().data or []
         
-    flattened = []
+    live_sessions = []
+    scheduled_sessions = []
+    ended_sessions = []
+    
     for row in data:
         batch_info = row.pop("batches", {}) or {}
         lesson_info = row.pop("topics", {}) or {}
@@ -1936,8 +1948,21 @@ async def get_all_sessions(user: dict = Depends(require_roles("mentor", "admin")
         row["course_title"] = course_info.get("title")
         row["topic_title"] = lesson_info.get("title")
         row["recording_url"] = recs[0]["url"] if recs else None
-        flattened.append(row)
-    return flattened
+        
+        if row.get("status") == "live":
+            live_sessions.append(row)
+        elif row.get("status") == "scheduled":
+            scheduled_sessions.append(row)
+        else:
+            ended_sessions.append(row)
+            
+    # Sort scheduled sessions ascending (soonest first)
+    scheduled_sessions.sort(key=lambda x: x.get("scheduled_at") or "")
+    
+    # Sort ended sessions descending (most recent first)
+    ended_sessions.sort(key=lambda x: x.get("scheduled_at") or "", reverse=True)
+    
+    return live_sessions + scheduled_sessions + ended_sessions
 
 
 @api.post("/live-classes")
@@ -2455,17 +2480,25 @@ async def get_weekly_leaderboard(user: dict = Depends(get_current_user)):
         # Format results
         leaderboard = []
         user_rank = "N/A"
+        current_rank = 1
+        prev_xp = None
         
         for i, student in enumerate(all_students):
             is_me = student["id"] == user["id"]
+            current_xp = student["total_xp"] or 0
+            
+            if prev_xp is not None and current_xp < prev_xp:
+                current_rank = i + 1
+                
             leaderboard.append({
-                "rank": i + 1,
+                "rank": current_rank,
                 "name": student["name"] or "Unknown Student",
-                "xp": student["total_xp"] or 0,
+                "xp": current_xp,
                 "is_me": is_me
             })
             if is_me:
-                user_rank = i + 1
+                user_rank = current_rank
+            prev_xp = current_xp
         
         # If current user is not in list, find their specific rank
         if user_rank == "N/A" and user["role"] == "student":
@@ -2609,6 +2642,7 @@ def fuzzy_match_student(name: str, email: str, enrolled_students: List[dict]):
                 
     if name:
         name_clean = name.lower().strip()
+        print(f"--- Fuzzy Match Start for Google Meet Name: '{name_clean}' ---")
         
         # 1. Exact case-insensitive match
         for s in enrolled_students:
@@ -2622,6 +2656,61 @@ def fuzzy_match_student(name: str, email: str, enrolled_students: List[dict]):
                 words_student = set(s["name"].lower().strip().split())
                 if words_input == words_student and len(words_input) > 0:
                     return s
+                    
+        # 2.5 Subset word match (e.g. LMS has "Hari", Meet has "Kamsu Hari")
+        subset_matches = []
+        for s in enrolled_students:
+            if s.get("name"):
+                words_student = set(s["name"].lower().strip().split())
+                if len(words_student) > 0 and len(words_input) > 0:
+                    if words_student.issubset(words_input) or words_input.issubset(words_student):
+                        subset_matches.append(s)
+        
+        print(f"Subset matches for '{name_clean}': {[m['name'] for m in subset_matches]}")
+        
+        # Only return if there's exactly one clear subset match to avoid collisions
+        if len(subset_matches) == 1:
+            print(f"Matched {name_clean} to {subset_matches[0]['name']} via subset word match.")
+            return subset_matches[0]
+            
+        # 2.7 Substring match (e.g. LMS has "hari", Meet has "harikamsu")
+        substring_matches = []
+        for s in enrolled_students:
+            if s.get("name"):
+                student_name_clean = s["name"].lower().strip()
+                if len(student_name_clean) >= 3 and (student_name_clean in name_clean or name_clean in student_name_clean):
+                    substring_matches.append(s)
+                    
+        print(f"Substring matches for '{name_clean}': {[m['name'] for m in substring_matches]}")
+        
+        if len(substring_matches) == 1:
+            print(f"Matched {name_clean} to {substring_matches[0]['name']} via substring match.")
+            return substring_matches[0]
+            
+        # 2.8 Any Word Match (If a significant word like "kamsu" or "hari" overlaps)
+        any_word_matches = []
+        for s in enrolled_students:
+            if s.get("name"):
+                student_name_clean = s["name"].lower().strip()
+                words_student = set(student_name_clean.split())
+                
+                overlap = False
+                for w_s in words_student:
+                    if len(w_s) >= 4 and w_s in name_clean:
+                        overlap = True
+                        break
+                    for w_i in words_input:
+                        if len(w_i) >= 4 and (w_s in w_i or w_i in w_s):
+                            overlap = True
+                            break
+                            
+                if overlap:
+                    any_word_matches.append(s)
+                    
+        print(f"Any word matches for '{name_clean}': {[m['name'] for m in any_word_matches]}")
+        if len(any_word_matches) == 1:
+            print(f"Matched {name_clean} to {any_word_matches[0]['name']} via any word match.")
+            return any_word_matches[0]
                 
         # 3. Fuzzy matching with lowercased strings
         best_match = None
@@ -2631,6 +2720,7 @@ def fuzzy_match_student(name: str, email: str, enrolled_students: List[dict]):
             if s.get("name"):
                 student_name_clean = s["name"].lower().strip()
                 dist = levenshtein_distance(name_clean, student_name_clean)
+                print(f"Levenshtein distance between '{name_clean}' and '{student_name_clean}': {dist}")
                 if dist < best_dist:
                     best_dist = dist
                     best_match = s
@@ -2991,6 +3081,115 @@ async def bulk_save_attendance(session_id: str, payload: BulkSaveAttendanceReque
         raise HTTPException(500, f"Database upsert failed: {str(e)}")
         
     return {"success": True}
+
+
+@api.post("/sessions/{session_id}/attendance/extension-sync")
+async def extension_sync_attendance(
+    session_id: str,
+    payload: ExtensionSyncRequest,
+    user: dict = Depends(require_roles("mentor", "admin"))
+):
+    session = get_single_or_none(supabase.table("class_sessions").select("*").eq("id", session_id))
+    if not session:
+        raise HTTPException(404, "Session not found")
+        
+    batch_id = session["batch_id"]
+    started_at_str = session.get("started_at")
+    ended_at_str = session.get("ended_at")
+    
+    class_duration = 60
+    if started_at_str:
+        try:
+            if 'Z' in started_at_str:
+                started_at = datetime.fromisoformat(started_at_str.replace('Z', '+00:00'))
+            else:
+                started_at = datetime.fromisoformat(started_at_str)
+                
+            if ended_at_str:
+                if 'Z' in ended_at_str:
+                    ended_at = datetime.fromisoformat(ended_at_str.replace('Z', '+00:00'))
+                else:
+                    ended_at = datetime.fromisoformat(ended_at_str)
+            else:
+                # If class hasn't officially ended, calculate duration up to RIGHT NOW
+                ended_at = now_utc()
+                
+            diff_mins = int((ended_at - started_at).total_seconds() / 60)
+            if diff_mins > 0:
+                class_duration = diff_mins
+        except Exception:
+            pass
+            
+    required_minutes = class_duration * 0.75
+
+    bs_res = supabase.table("batch_students")\
+        .select("users(id, name, email, is_active)")\
+        .eq("batch_id", batch_id)\
+        .execute().data or []
+        
+    enrolled_students = []
+    for row in bs_res:
+        u = row.get("users")
+        if u and u.get("is_active") and u.get("id"):
+            enrolled_students.append({
+                "id": u["id"],
+                "name": u["name"],
+                "email": u["email"]
+            })
+            
+    if not enrolled_students:
+        raise HTTPException(400, "No enrolled students found in this batch to match attendance.")
+
+    matched_count = 0
+    unmatched_names = []
+    attendance_dict = {}
+    
+    for p in payload.participants:
+        student = fuzzy_match_student(p.name, None, enrolled_students)
+        if student:
+            matched_count += 1
+            s_id = student["id"]
+            
+            # If we match the same student multiple times, keep the longest duration
+            if s_id in attendance_dict:
+                existing_duration = attendance_dict[s_id]["_raw_duration"]
+                if p.duration_minutes <= existing_duration:
+                    continue
+            
+            status = "present" if p.duration_minutes >= required_minutes else "absent"
+            override_reason = f"Meet duration: {int(p.duration_minutes)} min (Chrome Extension)"
+            if status == "absent":
+                override_reason = "Chrome Extension sync (Did not meet duration)"
+                
+            attendance_dict[s_id] = {
+                "class_session_id": session_id,
+                "student_id": s_id,
+                "status": status,
+                "override_reason": override_reason,
+                "_raw_duration": p.duration_minutes
+            }
+        else:
+            if p.name and p.name.strip():
+                unmatched_names.append(p.name.strip())
+                
+    # Remove internal _raw_duration key before upsert
+    attendance_records = []
+    for rec in attendance_dict.values():
+        rec.pop("_raw_duration", None)
+        attendance_records.append(rec)
+                
+    try:
+        if attendance_records:
+            supabase.table("attendance").upsert(attendance_records, on_conflict="class_session_id,student_id").execute()
+    except Exception as e:
+        logger.error(f"Error syncing extension attendance: {e}")
+        raise HTTPException(500, f"Database upsert failed: {str(e)}")
+        
+    return {
+        "saved": len(attendance_records),
+        "matched": matched_count,
+        "unmatched": list(set(unmatched_names))
+    }
 
 
 # -------------------- Attendance --------------------
@@ -3610,6 +3809,30 @@ async def get_batch_recordings(batch_id: str, user: dict = Depends(get_current_u
         flattened.append(row)
         
     return flattened
+
+
+@api.get("/mentor/sessions")
+async def get_mentor_active_sessions(user: dict = Depends(require_roles("mentor"))):
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    res = supabase.table("class_sessions")\
+        .select("id, status, scheduled_at, batches(name), topics(title)")\
+        .eq("mentor_id", user["id"])\
+        .execute().data
+    
+    active_sessions = []
+    for s in res:
+        is_today = s.get("scheduled_at") and s.get("scheduled_at").startswith(today)
+        if is_today or s.get("status") == "live":
+            active_sessions.append({
+                "id": s["id"],
+                "status": s["status"],
+                "scheduled_at": s["scheduled_at"],
+                "batch_name": s.get("batches", {}).get("name") if s.get("batches") else "Unknown Batch",
+                "topic_title": s.get("topics", {}).get("title") if s.get("topics") else "Custom Session"
+            })
+            
+    active_sessions.sort(key=lambda x: x["scheduled_at"] or "", reverse=True)
+    return active_sessions
 
 
 @api.get("/mentor/recordings")

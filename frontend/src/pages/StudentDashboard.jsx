@@ -26,6 +26,17 @@ export default function StudentDashboard() {
     })();
   }, []);
 
+  useEffect(() => {
+    if (data && window.location.hash === "#courses-section") {
+      const el = document.getElementById("courses-section");
+      if (el) {
+        setTimeout(() => {
+          el.scrollIntoView({ behavior: "smooth" });
+        }, 100);
+      }
+    }
+  }, [data]);
+
   if (!data) {
     return (
       <div className="min-h-screen bg-white">
@@ -43,33 +54,18 @@ export default function StudentDashboard() {
     <div className="min-h-screen bg-[#F8FAFC]" data-testid="student-dashboard">
       <Navbar />
       <div className="mx-auto max-w-7xl px-4 sm:px-6 py-8 fade-in">
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
-          <div>
-            <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500 mb-2">Student Console</div>
-            <h1 className="text-3xl sm:text-4xl font-bold tracking-tight" data-testid="dashboard-heading">
-              Welcome back, {data.mentor ? "ready to build?" : "ready to start?"}
-            </h1>
-            <p className="mt-1 text-slate-600 text-sm">Pick up where you left off and keep your streak alive.</p>
-          </div>
-          
-          <div className="flex items-center gap-1 bg-slate-200/50 p-1 rounded-sm border border-slate-200">
-            <TabButton 
-              label={`Inprogress (${inprogressCourses.length})`} 
-              active={activeTab === "inprogress"} 
-              onClick={() => setActiveTab("inprogress")} 
-            />
-            <TabButton 
-              label={`Completed (${completedCourses.length})`} 
-              active={activeTab === "completed"} 
-              onClick={() => setActiveTab("completed")} 
-            />
-          </div>
+        <div className="mb-8">
+          <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500 mb-2">Student Console</div>
+          <h1 className="text-3xl sm:text-4xl font-bold tracking-tight" data-testid="dashboard-heading">
+            Welcome back, {data.mentor ? "ready to build?" : "ready to start?"}
+          </h1>
+          <p className="mt-1 text-slate-600 text-sm">Pick up where you left off and keep your streak alive.</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
           <Stat label="Total XP" value={`${data.gamification?.total_xp || 0} XP`} Icon={Award} />
           <Stat label="Current Level" value={`Lvl ${data.gamification?.level || 1}`} Icon={Target} subtitle={`Next: ${100 - (data.gamification?.total_xp % 100)} XP`} />
-          <Stat label="Daily Streak" value={`${data.gamification?.streak || 0} Days`} Icon={Flame} />
+          <Stat label="Daily Streak" value={`${data.gamification?.streak || 0} ${data.gamification?.streak === 1 ? 'Day' : 'Days'}`} Icon={Flame} />
           <Stat 
             label="Weekly Rank" 
             value={data.gamification?.weekly_rank === "N/A" ? "N/A" : `#${data.gamification?.weekly_rank}`} 
@@ -145,10 +141,22 @@ export default function StudentDashboard() {
           );
         })()}
 
-        <div className="flex items-center justify-between mb-4">
+        <div id="courses-section" className="flex items-center justify-between mb-6">
           <h2 className="text-xl font-bold tracking-tight text-slate-900">
             {activeTab === "inprogress" ? "My Courses" : "Completed Excellence"}
           </h2>
+          <div className="flex items-center gap-1 bg-slate-200/50 p-1 rounded-sm border border-slate-200">
+            <TabButton 
+              label={`Inprogress (${inprogressCourses.length})`} 
+              active={activeTab === "inprogress"} 
+              onClick={() => setActiveTab("inprogress")} 
+            />
+            <TabButton 
+              label={`Completed (${completedCourses.length})`} 
+              active={activeTab === "completed"} 
+              onClick={() => setActiveTab("completed")} 
+            />
+          </div>
         </div>
 
         <div className="grid grid-cols-1 gap-6">

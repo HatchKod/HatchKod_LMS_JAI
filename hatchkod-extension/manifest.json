@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "HatchKod Auto-Attendance",
+  "version": "1.0.0",
+  "description": "Automatically track and sync Google Meet attendance to the HatchKod LMS.",
+  "permissions": [
+    "storage",
+    "scripting",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "*://meet.google.com/*",
+    "http://localhost:8000/*",
+    "https://*.hatchkod.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["*://meet.google.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_end"
+    },
+    {
+      "matches": ["http://localhost:5173/*", "https://*.hatchkod.com/*", "https://hatchkod.com/*"],
+      "js": ["lms_content.js"],
+      "run_at": "document_end"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  }
+}

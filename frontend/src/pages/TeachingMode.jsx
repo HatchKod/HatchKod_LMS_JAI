@@ -139,6 +139,8 @@ export default function TeachingMode() {
     }
   }, [classId]);
 
+  const [extensionStatus, setExtensionStatus] = useState('checking'); // checking, connected, not_installed
+
   useEffect(() => {
     loadInitialData();
 
@@ -162,11 +164,58 @@ export default function TeachingMode() {
     };
   }, [classId, loadInitialData, navigate]);
 
+  // Extension Integration Effect
   useEffect(() => {
     if (session?.status !== 'live') return;
+
+    // Listen for PONG
+    const handleMessage = (event) => {
+      if (event.source !== window) return;
+      if (event.data?.source === "HATCHKOD_EXTENSION" && event.data?.action === "PONG") {
+        setExtensionStatus('connected');
+        
+        // Extension confirmed installed, send start command
+        window.postMessage({
+          source: "HATCHKOD_LMS",
+          action: "HATCHKOD_START_CLASS",
+          session_id: classId,
+          token: localStorage.getItem('hk_token') || '',
+          api_url: import.meta.env.VITE_API_URL || "http://localhost:8000/api"
+        }, "*");
+      }
+    };
+
+    window.addEventListener("message", handleMessage);
+
+    // Ping the extension
+    window.postMessage({ source: "HATCHKOD_LMS", action: "PING" }, "*");
+
+    // Timeout if no pong
+    const timeoutId = setTimeout(() => {
+      setExtensionStatus((prev) => {
+        if (prev === 'checking') {
+          toast.warning(
+            <div className="flex flex-col gap-1">
+              <span className="font-bold text-slate-800">Extension not detected</span>
+              <span className="text-xs text-slate-600">Install the HatchKod Chrome Extension for automated attendance tracking.</span>
+              <a href="#" className="text-xs text-[#194BFB] underline mt-1">Get Extension</a>
+            </div>, 
+            { duration: 10000, id: 'extension-not-detected' }
+          );
+          return 'not_installed';
+        }
+        return prev;
+      });
+    }, 1500);
+
     const interval = setInterval(pollAttendance, 10000);
-    return () => clearInterval(interval);
-  }, [session?.status, pollAttendance]);
+    
+    return () => {
+      clearInterval(interval);
+      clearTimeout(timeoutId);
+      window.removeEventListener("message", handleMessage);
+    };
+  }, [session?.status, pollAttendance, classId]);
 
   // 3. Live Timer Logic
   useEffect(() => {
@@ -192,6 +241,12 @@ export default function TeachingMode() {
   const handleEndClass = async () => {
     setEndingBusy(true);
     try {
+      // Tell Chrome extension to sync and stop tracking
+      window.postMessage({
+        source: "HATCHKOD_LMS",
+        action: "HATCHKOD_END_CLASS"
+      }, "*");
+
       await api.post(`/sessions/${classId}/end`);
       setClassEndedSuccess(true);
       toast.success("Class ended successfully.");
@@ -292,6 +347,12 @@ export default function TeachingMode() {
             <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
             <span className="text-[10px] font-black uppercase tracking-[0.2em] opacity-80">Live Class:</span>
             <span className="text-[10px] font-mono font-bold text-emerald-400">{timer}</span>
+          </div>
+          <div className="flex items-center gap-2 border-l border-white/10 pl-6">
+            <div className={`h-2 w-2 rounded-full ${extensionStatus === 'connected' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : extensionStatus === 'checking' ? 'bg-amber-500 animate-pulse' : 'bg-slate-500'}`} />
+            <span className="text-[10px] font-black uppercase tracking-[0.2em] opacity-80">
+              Ext {extensionStatus === 'connected' ? 'Ready' : extensionStatus === 'checking' ? 'Wait' : 'Off'}
+            </span>
           </div>
         </div>
 
