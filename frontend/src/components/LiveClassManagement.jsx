@@ -33,7 +33,6 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import RecordingUpload from "./mentor/RecordingUpload";
-import SessionAttendance from "./mentor/SessionAttendance";
 import { Users } from "lucide-react";
 
 const formatVideoUrl = (url) => {
@@ -61,7 +60,6 @@ export default function LiveClassManagement({ role, userId }) {
   const [busy, setBusy] = useState(false);
   const [startingId, setStartingId] = useState(null);
   const [inlineUrlEdit, setInlineUrlEdit] = useState(null);
-  const [attendanceSession, setAttendanceSession] = useState(null);
   const timeInputRef = useRef(null);
   const [form, setForm] = useState({
     batch_id: "",
@@ -289,13 +287,9 @@ export default function LiveClassManagement({ role, userId }) {
                           </Button>
                         )}
                         {c.status === "ended" && (
-                          <Button 
-                            variant="outline" 
-                            onClick={() => setAttendanceSession(c)}
-                            className="rounded-sm border-slate-200 text-slate-600 h-9 px-4 text-xs font-bold uppercase tracking-widest hover:bg-slate-50"
-                          >
-                            <Users className="h-3.5 w-3.5 mr-2" /> Attendance
-                          </Button>
+                          <div className="text-xs text-slate-400 font-bold uppercase tracking-widest px-3 py-2">
+                            Class Ended
+                          </div>
                         )}
                         <Button 
                           onClick={() => deleteClass(c.id)} 
@@ -468,19 +462,6 @@ export default function LiveClassManagement({ role, userId }) {
         </DialogContent>
       </Dialog>
 
-      {/* Attendance Modal */}
-      <Dialog open={!!attendanceSession} onOpenChange={() => setAttendanceSession(null)}>
-        <DialogContent className="sm:max-w-xl p-0 overflow-hidden border-none shadow-2xl">
-          {attendanceSession && (
-            <SessionAttendance 
-              sessionId={attendanceSession.id}
-              sessionTopic={attendanceSession.topic_title}
-              sessionDate={attendanceSession.scheduled_at}
-              onClose={() => setAttendanceSession(null)}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

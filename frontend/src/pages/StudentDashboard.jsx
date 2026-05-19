@@ -7,7 +7,6 @@ import { Card } from "../components/ui/card";
 import { Progress } from "../components/ui/progress";
 import { Button } from "../components/ui/button";
 import TodaysClasses from "../components/student/TodaysClasses";
-import MyAttendance from "../components/student/MyAttendance";
 import { Avatar, AvatarFallback } from "../components/ui/avatar";
 import StatusPill from "../components/StatusPill";
 import { Users, Award, Target, Flame, Trophy, Video, BookOpen, ListChecks, Clock, ArrowRight, TrendingUp } from "lucide-react";
@@ -85,11 +84,6 @@ export default function StudentDashboard() {
         <div className="mb-12">
           <div className="text-[10px] uppercase tracking-[0.22em] text-slate-400 font-bold mb-4">LIVE SESSIONS</div>
           <TodaysClasses />
-        </div>
-
-        <div className="mb-12">
-          <div className="text-[10px] uppercase tracking-[0.22em] text-slate-400 font-bold mb-4">MY ATTENDANCE</div>
-          <MyAttendance />
         </div>
 
         {data.next_topic && activeTab === "inprogress" && (() => {
