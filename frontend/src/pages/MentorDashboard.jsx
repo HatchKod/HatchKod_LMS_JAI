@@ -25,7 +25,7 @@ import {
 import { toast } from "sonner";
 import LiveClassManagement from "../components/LiveClassManagement";
 import MentorRecordings from "../components/mentor/MentorRecordings";
-import MentorAttendance from "../components/mentor/MentorAttendance";
+// import MentorAttendance from "../components/mentor/MentorAttendance";
 import MentorProgress from "../components/mentor/MentorProgress";
 import { BarChart2 } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
@@ -93,9 +93,6 @@ export default function MentorDashboard() {
             </button>
             <button onClick={() => setActiveTab("recordings")} className={`px-4 py-1.5 text-xs font-bold rounded transition-all flex items-center gap-2 ${activeTab === 'recordings' ? "bg-white text-slate-900 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-700"}`}>
               <PlayCircle className="h-3 w-3" /> Recordings
-            </button>
-            <button onClick={() => setActiveTab("attendance")} className={`px-4 py-1.5 text-xs font-bold rounded transition-all flex items-center gap-2 ${activeTab === 'attendance' ? "bg-white text-slate-900 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-700"}`}>
-              <Users className="h-3 w-3" /> Attendance
             </button>
             <button onClick={() => setActiveTab("progress")} className={`px-4 py-1.5 text-xs font-bold rounded transition-all flex items-center gap-2 ${activeTab === 'progress' ? "bg-white text-slate-900 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-700"}`}>
               <BarChart2 className="h-3 w-3" /> Progress
@@ -207,10 +204,6 @@ export default function MentorDashboard() {
         ) : activeTab === "recordings" ? (
           <div className="mt-8">
             <MentorRecordings />
-          </div>
-        ) : activeTab === "attendance" ? (
-          <div className="mt-8">
-            <MentorAttendance />
           </div>
         ) : (
           <div className="mt-8">
