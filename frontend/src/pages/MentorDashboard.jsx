@@ -25,7 +25,6 @@ import {
 import { toast } from "sonner";
 import LiveClassManagement from "../components/LiveClassManagement";
 import MentorRecordings from "../components/mentor/MentorRecordings";
-// import MentorAttendance from "../components/mentor/MentorAttendance";
 import MentorProgress from "../components/mentor/MentorProgress";
 import { BarChart2 } from "lucide-react";
 import { useSearchParams } from "react-router-dom";

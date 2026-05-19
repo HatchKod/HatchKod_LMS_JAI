@@ -6,9 +6,7 @@ import {
   GitBranch, 
   ShieldCheck, 
   Workflow, 
-  Database, 
   Layers, 
-  Cpu, 
   Globe,
   CheckCircle2,
   HelpCircle,
@@ -55,18 +53,6 @@ export default function Landing() {
                     {user ? "Go to Dashboard" : "Sign In to Learning"} <ArrowRight className="ml-2 h-5 w-5" />
                   </Link>
                 </Button>
-                <div className="flex items-center gap-4 px-2">
-                  <div className="flex -space-x-2">
-                    {[1, 2, 3, 4].map((i) => (
-                      <div key={i} className="h-10 w-10 rounded-full border-2 border-white bg-slate-100 flex items-center justify-center text-[10px] font-bold text-slate-600">
-                        {String.fromCharCode(64 + i)}
-                      </div>
-                    ))}
-                  </div>
-                  <div className="text-xs text-slate-500 font-medium">
-                    <span className="text-[#0A0A0A] font-bold">500+</span> students<br />building today
-                  </div>
-                </div>
               </div>
 
               <div className="mt-16 pt-10 border-t border-slate-100 grid grid-cols-2 sm:grid-cols-4 gap-8">
@@ -124,11 +110,9 @@ export default function Landing() {
             <p className="text-slate-600 font-medium">We only teach what the industry actually uses.</p>
           </div>
           <div className="flex flex-wrap justify-center gap-8 md:gap-16 opacity-60 hover:opacity-100 transition-opacity duration-500 grayscale hover:grayscale-0">
-            <TechIcon Icon={Database} label="PostgreSQL" />
             <TechIcon Icon={Layers} label="Spring Boot" />
             <TechIcon Icon={Code2} label="Java" />
             <TechIcon Icon={Globe} label="React.js" />
-            <TechIcon Icon={Cpu} label="AWS" />
             <TechIcon Icon={GitBranch} label="Git/GitHub" />
           </div>
         </div>
