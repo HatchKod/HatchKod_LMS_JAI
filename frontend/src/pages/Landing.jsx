@@ -37,7 +37,7 @@ export default function Landing() {
               </div>
               
               <h1 className="text-5xl sm:text-6xl lg:text-7xl font-bold tracking-tight leading-[1] text-[#0A0A0A] font-['Outfit']" data-testid="hero-heading">
-                Build real software.
+                Build real softwares.
                 <br />
                 <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#194BFB] to-[#FF5500]">Get real jobs.</span>
               </h1>
