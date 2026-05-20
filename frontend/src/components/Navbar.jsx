@@ -31,7 +31,8 @@ import {
   Mail,
   Code2,
   Trophy,
-  Image
+  Image,
+  CreditCard
 } from "lucide-react";
 import { toast } from "sonner";
 import NotificationBell from "./NotificationBell";
@@ -154,6 +155,17 @@ export default function Navbar({ unreadCount }) {
                     <Image className="h-4 w-4" />
                     Image Library
                   </Link>
+                  <Link
+                    to="/admin/payments"
+                    className={`flex items-center gap-2 px-3 py-2 text-sm font-medium transition-colors rounded-md ${
+                      isActive("/admin/payments")
+                        ? "text-[#194BFB] bg-[#194BFB]/5"
+                        : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
+                    }`}
+                  >
+                    <CreditCard className="h-4 w-4" />
+                    Payments
+                  </Link>
                 </>
               )}
             </nav>
@@ -200,6 +212,12 @@ export default function Navbar({ unreadCount }) {
                       </AvatarFallback>
                     </Avatar>
                     <span>My Profile</span>
+                  </DropdownMenuItem>
+                )}
+                {user.role === "student" && (
+                  <DropdownMenuItem onClick={() => nav("/billing")} className="cursor-pointer">
+                    <CreditCard className="mr-2 h-4 w-4 text-slate-500" />
+                    <span>Billing & Payments</span>
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuItem onClick={() => setIsPasswordModalOpen(true)} className="cursor-pointer">

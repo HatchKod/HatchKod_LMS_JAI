@@ -91,3 +91,5 @@ Whenever you pull the latest code from Git, ensure you sync your dependencies to
    cd backend
    pip install -r requirements.txt
    ```
+
+## Test
