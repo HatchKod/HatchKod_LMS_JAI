@@ -25,6 +25,8 @@ import Leaderboard from "./pages/Leaderboard";
 import TeachingMode from "./pages/TeachingMode";
 import StudentProgress from "./pages/StudentProgress";
 import ImageLibrary from "./pages/ImageLibrary";
+import PaymentAdmin from "./pages/admin/PaymentAdmin";
+import StudentBilling from "./pages/StudentBilling";
 
 
 export default function App() {
@@ -91,6 +93,12 @@ export default function App() {
               } />
               <Route path="/admin/images" element={
                 <ProtectedRoute roles={["admin"]}><ImageLibrary /></ProtectedRoute>
+              } />
+              <Route path="/admin/payments" element={
+                <ProtectedRoute roles={["admin"]}><PaymentAdmin /></ProtectedRoute>
+              } />
+              <Route path="/billing" element={
+                <ProtectedRoute><StudentBilling /></ProtectedRoute>
               } />
             </Routes>
           </BrowserRouter>

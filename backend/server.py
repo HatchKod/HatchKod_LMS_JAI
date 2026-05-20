@@ -275,6 +275,75 @@ def require_roles(*roles: str):
     return _dep
 
 
+def get_effective_tier(user: dict) -> str:
+    if user.get("role") != "student":
+        return "full"
+    tier = user.get("access_tier", "demo")
+    if tier == "demo":
+        expired_at = user.get("demo_expired_at")
+        if expired_at:
+            try:
+                if isinstance(expired_at, str):
+                    dt = datetime.fromisoformat(expired_at.replace("Z", "+00:00"))
+                else:
+                    dt = expired_at
+                if now_utc() >= dt:
+                    return "expired"
+            except Exception as e:
+                logger.error(f"Error parsing demo_expired_at: {e}")
+    return tier
+
+
+def check_module_access(user_id: str, module_id: str, tier: str, batch_id: str) -> bool:
+    if tier == "full":
+        return True
+    if tier == "expired":
+        return False
+        
+    # Resolve the course of the module to find the specific batch the student is enrolled in
+    module_res = supabase.table("modules").select("course_id").eq("id", module_id).single().execute()
+    if not module_res.data:
+        return False
+    course_id = module_res.data.get("course_id")
+    
+    batch_res = supabase.table("batch_students").select("batch_id, batches(course_id)").eq("student_id", user_id).execute().data or []
+    matching_batch_id = None
+    for b in batch_res:
+        if b.get("batches", {}).get("course_id") == course_id:
+            matching_batch_id = b["batch_id"]
+            break
+            
+    resolved_batch_id = matching_batch_id or batch_id
+    if not resolved_batch_id:
+        return False
+        
+    res = supabase.table("batch_module_access").select("id").eq("batch_id", resolved_batch_id).eq("module_id", module_id).eq("tier", tier).execute().data
+    return len(res) > 0
+
+
+async def require_active_access(user: dict = Depends(get_current_user)) -> dict:
+    effective_tier = get_effective_tier(user)
+    if effective_tier == "expired":
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "ACCESS_EXPIRED",
+                "message": "Your demo access has expired. Please make a payment to continue.",
+                "tier": "expired"
+            }
+        )
+    user["effective_tier"] = effective_tier
+    return user
+
+
+def require_active_role(*roles: str):
+    async def _dep(user: dict = Depends(require_active_access)) -> dict:
+        if user["role"] not in roles:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        return user
+    return _dep
+
+
 # -------------------- Schemas --------------------
 class RegisterIn(BaseModel):
     name: str
@@ -974,7 +1043,7 @@ async def get_module_topics(module_id: str, _: dict = Depends(require_roles("adm
 
 
 @api.get("/subtopics/{subtopic_id}")
-async def get_subtopic(subtopic_id: str, user: dict = Depends(get_current_user)):
+async def get_subtopic(subtopic_id: str, user: dict = Depends(require_active_access)):
     # Fetch subtopic with basic context
     # Faster fetching: Get subtopic and its direct parent info
     subtopic_res = supabase.table("subtopics").select("*, tasks(*), topics(id, title, module_id)").eq("id", subtopic_id).single().execute()
@@ -985,6 +1054,15 @@ async def get_subtopic(subtopic_id: str, user: dict = Depends(get_current_user))
     
     # Get basic course context safely
     module_id = topic_raw.get("module_id")
+    
+    # Enforce module-level payment access checks for student role
+    if user["role"] == "student" and module_id:
+        effective_tier = user.get("effective_tier", "demo")
+        if effective_tier != "full":
+            has_access = check_module_access(user["id"], module_id, effective_tier, user.get("batch_id"))
+            if not has_access:
+                raise HTTPException(status_code=403, detail={"code": "TIER_LOCKED", "message": "Module access denied under current tier."})
+                
     module_raw = {}
     course_id = None
     
@@ -1189,14 +1267,25 @@ async def upload_submission_file(file: UploadFile = File(...), user: dict = Depe
 
 
 @api.post("/subtopics/{subtopic_id}/submit")
-async def submit_task(subtopic_id: str, payload: SubmissionIn, user: dict = Depends(require_roles("student"))):
+async def submit_task(subtopic_id: str, payload: SubmissionIn, user: dict = Depends(require_active_role("student"))):
     task = get_single_or_none(supabase.table("tasks").select("*").eq("subtopic_id", subtopic_id))
     if not task:
         raise HTTPException(404, "No task for this subtopic")
     
     # Check if subtopic is unlocked (using parent topic check)
-    sub_res = supabase.table("subtopics").select("topic_id").eq("id", subtopic_id).single().execute()
+    sub_res = supabase.table("subtopics").select("topic_id, topics(module_id)").eq("id", subtopic_id).single().execute()
     if not sub_res.data: raise HTTPException(404, "Subtopic not found")
+    
+    # Enforce module-level payment check
+    topic_data = sub_res.data.get("topics") or {}
+    module_id = topic_data.get("module_id")
+    if module_id:
+        effective_tier = user.get("effective_tier", "demo")
+        if effective_tier != "full":
+            has_access = check_module_access(user["id"], module_id, effective_tier, user.get("batch_id"))
+            if not has_access:
+                raise HTTPException(status_code=403, detail="Module access denied under current tier.")
+
     if not await is_topic_unlocked(user["id"], sub_res.data["topic_id"]):
         raise HTTPException(403, "Subtopic locked")
     if not (payload.submission_url or payload.submission_text):
@@ -1253,10 +1342,21 @@ async def submit_task(subtopic_id: str, payload: SubmissionIn, user: dict = Depe
 
 
 @api.post("/subtopics/{subtopic_id}/complete")
-async def complete_subtopic(subtopic_id: str, payload: TopicCompleteIn, user: dict = Depends(require_roles("student"))):
+async def complete_subtopic(subtopic_id: str, payload: TopicCompleteIn, user: dict = Depends(require_active_role("student"))):
     subtopic = get_single_or_none(supabase.table("subtopics").select("*").eq("id", subtopic_id))
     if not subtopic:
         raise HTTPException(404, "Subtopic not found")
+
+    # Enforce module-level payment check
+    topic_res = supabase.table("topics").select("module_id").eq("id", subtopic["topic_id"]).single().execute()
+    if topic_res.data:
+        module_id = topic_res.data.get("module_id")
+        if module_id:
+            effective_tier = user.get("effective_tier", "demo")
+            if effective_tier != "full":
+                has_access = check_module_access(user["id"], module_id, effective_tier, user.get("batch_id"))
+                if not has_access:
+                    raise HTTPException(status_code=403, detail="Module access denied under current tier.")
 
     # If it's a task subtopic, it cannot be manually completed
     has_task = get_single_or_none(supabase.table("tasks").select("id").eq("subtopic_id", subtopic_id))
@@ -2588,6 +2688,39 @@ async def end_session(session_id: str, user: dict = Depends(require_roles("mento
     
     session = res.data[0]
     
+    # Hook: Automatic demo expiry (5 classes threshold)
+    batch_id = session.get("batch_id")
+    if batch_id:
+        try:
+            # Check if this session is already logged as a demo session for the batch
+            existing_demo = supabase.table("batch_demo_sessions").select("id").eq("batch_id", batch_id).eq("session_id", session_id).execute().data
+            if not existing_demo:
+                # Count current demo sessions to assign the session_num
+                current_demos = supabase.table("batch_demo_sessions").select("id").eq("batch_id", batch_id).execute().data
+                session_num = len(current_demos) + 1
+                
+                # Log this session
+                supabase.table("batch_demo_sessions").insert({
+                    "batch_id": batch_id,
+                    "session_id": session_id,
+                    "session_num": session_num
+                }).execute()
+
+                # If we just recorded the 5th session, expire all demo students in the batch
+                if session_num >= 5:
+                    # Get student IDs in this batch
+                    batch_students_data = supabase.table("batch_students").select("student_id").eq("batch_id", batch_id).execute().data
+                    if batch_students_data:
+                        student_ids = [s["student_id"] for s in batch_students_data]
+                        if student_ids:
+                            supabase.table("users").update({
+                                "access_tier": "expired",
+                                "demo_expired_at": iso(now)
+                            }).in_("id", student_ids).eq("access_tier", "demo").execute()
+                            logger.info(f"Batch {batch_id}: {session_num}th demo session completed. Expired access for all demo students.")
+        except Exception as demo_err:
+            logger.error(f"Error in automatic demo expiry hook: {demo_err}")
+
     # 2. Insert into recordings
     try:
         supabase.table("recordings").insert({
@@ -4292,7 +4425,7 @@ async def on_shutdown():
 
 # -------------------- Courses (Student/Public) --------------------
 @api.get("/courses")
-async def get_courses(user: dict = Depends(get_current_user)):
+async def get_courses(user: dict = Depends(require_active_access)):
     if user["role"] == "student":
         # --- BATCH FILTER: Only show the course(s) from the student's assigned batch(es) ---
         student_batches = supabase.table("batch_students")\
@@ -4321,7 +4454,7 @@ async def get_courses(user: dict = Depends(get_current_user)):
     return courses
 
 @api.get("/courses/{course_id}")
-async def get_course(course_id: str, user: dict = Depends(get_current_user)):
+async def get_course(course_id: str, user: dict = Depends(require_active_access)):
     course_res = supabase.table("courses").select("*, users(name)").eq("id", course_id).single().execute()
     if not course_res.data:
         raise HTTPException(404, "Course not found")
@@ -4330,6 +4463,29 @@ async def get_course(course_id: str, user: dict = Depends(get_current_user)):
     # 1. Fetch modules
     modules_res = supabase.table("modules").select("*").eq("course_id", course_id).execute()
     modules = modules_res.data or []
+    
+    # Filter modules based on student's payment tier access configuration
+    if user["role"] == "student":
+        effective_tier = user.get("effective_tier", "demo")
+        if effective_tier != "full":
+            batch_res = supabase.table("batch_students").select("batch_id, batches(course_id)").eq("student_id", user["id"]).execute().data or []
+            matching_batch_id = None
+            for b in batch_res:
+                if b.get("batches", {}).get("course_id") == course_id:
+                    matching_batch_id = b["batch_id"]
+                    break
+            
+            resolved_batch_id = matching_batch_id or user.get("batch_id")
+            if not resolved_batch_id:
+                for m in modules:
+                    m["tier_locked"] = True
+            else:
+                allowed_res = supabase.table("batch_module_access").select("module_id").eq("batch_id", resolved_batch_id).eq("tier", effective_tier).execute().data
+                allowed_module_ids = {r["module_id"] for r in allowed_res} if allowed_res else set()
+                
+                for m in modules:
+                    m["tier_locked"] = m["id"] not in allowed_module_ids
+                
     modules.sort(key=lambda x: x.get("sequence_order") or x.get("order_index") or 0)
     module_ids = [m["id"] for m in modules]
     
@@ -4382,8 +4538,15 @@ async def get_course(course_id: str, user: dict = Depends(get_current_user)):
     sub_map = {s["subtopic_id"]: s for s in sub_res if s.get("subtopic_id")}
 
     ordered_topics = []
+    
+    # Propagate tier_locked to topics and subtopics for frontend rendering
     for m in modules:
         m["topics"] = topics_by_mod.get(m["id"], [])
+        is_module_locked = m.get("tier_locked", False)
+        for t in m["topics"]:
+            t["tier_locked"] = is_module_locked
+            for s in t.get("subtopics", []):
+                s["tier_locked"] = is_module_locked
         ordered_topics.extend(m["topics"])
 
     if user["role"] == "student":
@@ -4433,6 +4596,336 @@ async def get_course(course_id: str, user: dict = Depends(get_current_user)):
     course["modules"] = modules
     return course
 
+# -------------------- Payment Schemas --------------------
+class PaymentRecordIn(BaseModel):
+    user_id: str
+    amount: int
+    payment_type: Literal["partial", "full", "balance"]
+    reference_id: Optional[str] = None
+    notes: Optional[str] = None
+
+class BatchModuleAccessIn(BaseModel):
+    module_ids: List[str]
+    tier: Literal["demo", "partial"]
+
+# -------------------- Payment Routes --------------------
+
+@api.get("/payment/status")
+async def get_payment_status(user: dict = Depends(get_current_user)):
+    effective_tier = get_effective_tier(user)
+    
+    # Pricing configuration constants as requested:
+    # First payment (partial): ₹2500, second payment (balance): ₹6000, direct full: ₹8500
+    pricing = {
+        "partial_amount": 2500,
+        "balance_amount": 6000,
+        "full_amount": 8500
+    }
+    
+    # Calculate balance due
+    amount_paid = user.get("amount_paid", 0)
+    tier = user.get("access_tier", "demo")
+    
+    balance_due = 0
+    if tier == "demo" or tier == "expired":
+        balance_due = pricing["full_amount"]
+    elif tier == "partial":
+        balance_due = pricing["balance_amount"]
+    elif tier == "full":
+        balance_due = 0
+
+    return {
+        "access_tier": tier,
+        "effective_tier": effective_tier,
+        "amount_paid": amount_paid,
+        "balance_due": balance_due,
+        "demo_expired_at": user.get("demo_expired_at"),
+        "pricing": pricing
+    }
+
+@api.get("/payment/history")
+async def get_my_payment_history(user: dict = Depends(get_current_user)):
+    payments = supabase.table("payments").select("*").eq("user_id", user["id"]).order("created_at", desc=True).execute().data or []
+    if payments:
+        admin_ids = list({p["recorded_by"] for p in payments if p.get("recorded_by")})
+        if admin_ids:
+            admins = supabase.table("users").select("id, name").in_("id", admin_ids).execute().data or []
+            admin_map = {a["id"]: a["name"] for a in admins}
+            for p in payments:
+                p["recorded_by_name"] = admin_map.get(p.get("recorded_by"), "System")
+        else:
+            for p in payments:
+                p["recorded_by_name"] = "System"
+    return payments
+
+@api.get("/payment/accessible-modules")
+async def get_accessible_modules(user: dict = Depends(require_active_access)):
+    batch_id = user.get("batch_id")
+    role = user.get("role")
+    effective_tier = user.get("effective_tier", "demo")
+    
+    if role != "student" or effective_tier == "full":
+        return {"has_full_access": True, "module_ids": []}
+    
+    if not batch_id:
+        return {"has_full_access": False, "module_ids": []}
+        
+    res = supabase.table("batch_module_access").select("module_id").eq("batch_id", batch_id).eq("tier", effective_tier).execute().data
+    module_ids = [r["module_id"] for r in res] if res else []
+    
+    return {"has_full_access": False, "module_ids": module_ids}
+
+@api.post("/admin/payment/record")
+async def record_payment(payload: PaymentRecordIn, user: dict = Depends(require_roles("admin"))):
+    target_user = get_single_or_none(supabase.table("users").select("*").eq("id", payload.user_id))
+    if not target_user:
+        raise HTTPException(status_code=404, detail="Student not found")
+        
+    current_tier = target_user.get("access_tier", "demo")
+    current_paid = target_user.get("amount_paid", 0)
+    
+    # State transitions check
+    new_tier = current_tier
+    new_paid = current_paid + payload.amount
+    
+    if payload.payment_type == "partial":
+        if current_tier not in ["demo", "expired"]:
+            raise HTTPException(status_code=400, detail=f"Cannot record partial payment for user in '{current_tier}' tier.")
+        new_tier = "partial"
+    elif payload.payment_type == "full":
+        if current_tier not in ["demo", "expired"]:
+            raise HTTPException(status_code=400, detail=f"Cannot record full payment for user in '{current_tier}' tier.")
+        new_tier = "full"
+    elif payload.payment_type == "balance":
+        if current_tier != "partial":
+            raise HTTPException(status_code=400, detail="Cannot record balance payment unless current tier is 'partial'.")
+        new_tier = "full"
+        
+    # Start transaction-like flow (insert payment record, update user)
+    payment_res = supabase.table("payments").insert({
+        "user_id": payload.user_id,
+        "amount": payload.amount,
+        "payment_type": payload.payment_type,
+        "reference_id": payload.reference_id,
+        "notes": payload.notes,
+        "recorded_by": user["id"]
+    }).execute()
+    
+    if not payment_res.data:
+        raise HTTPException(status_code=500, detail="Failed to create payment record")
+        
+    # Update user in DB
+    user_update = {
+        "access_tier": new_tier,
+        "amount_paid": new_paid
+    }
+    
+    supabase.table("users").update(user_update).eq("id", payload.user_id).execute()
+    
+    return {
+        "status": "success",
+        "user_id": payload.user_id,
+        "new_tier": new_tier,
+        "amount_paid": new_paid,
+        "payment_id": payment_res.data[0]["id"]
+    }
+
+@api.get("/admin/payment/students")
+async def get_admin_students(tier: Optional[str] = None, batch_id: Optional[str] = None, user: dict = Depends(require_roles("admin"))):
+    query = supabase.table("users").select("id, name, email, access_tier, amount_paid, demo_expired_at, role")
+    if tier:
+        query = query.eq("access_tier", tier)
+    else:
+        query = query.eq("role", "student")
+        
+    users_data = query.execute().data or []
+    
+    batch_students = supabase.table("batch_students").select("student_id, batch_id, batches(name)").execute().data or []
+    student_to_batch = {
+        bs["student_id"]: {
+            "batch_id": bs["batch_id"],
+            "batch_name": bs["batches"]["name"] if bs.get("batches") else "Unknown"
+        }
+        for bs in batch_students
+    }
+    
+    enriched_students = []
+    for u in users_data:
+        effective = get_effective_tier(u)
+        b_info = student_to_batch.get(u["id"], {"batch_id": None, "batch_name": "Unassigned"})
+        
+        if batch_id and b_info["batch_id"] != batch_id:
+            continue
+            
+        enriched_students.append({
+            "id": u["id"],
+            "name": u["name"],
+            "email": u["email"],
+            "access_tier": u["access_tier"],
+            "effective_tier": effective,
+            "amount_paid": u["amount_paid"],
+            "demo_expired_at": u["demo_expired_at"],
+            "batch_id": b_info["batch_id"],
+            "batch_name": b_info["batch_name"]
+        })
+        
+    return enriched_students
+
+@api.get("/admin/payment/history/{user_id}")
+async def get_payment_history(user_id: str, user: dict = Depends(require_roles("admin"))):
+    payments = supabase.table("payments").select("*").eq("user_id", user_id).order("created_at", desc=True).execute().data or []
+    if payments:
+        admin_ids = list({p["recorded_by"] for p in payments if p.get("recorded_by")})
+        if admin_ids:
+            admins = supabase.table("users").select("id, name").in_("id", admin_ids).execute().data or []
+            admin_map = {a["id"]: a["name"] for a in admins}
+            for p in payments:
+                p["recorded_by_name"] = admin_map.get(p.get("recorded_by"), "System")
+        else:
+            for p in payments:
+                p["recorded_by_name"] = "System"
+    return payments
+
+@api.post("/admin/batch/{batch_id}/module-access")
+async def set_batch_module_access(batch_id: str, payload: BatchModuleAccessIn, user: dict = Depends(require_roles("admin"))):
+    supabase.table("batch_module_access").delete().eq("batch_id", batch_id).eq("tier", payload.tier).execute()
+    
+    if not payload.module_ids:
+        return {"status": "success", "message": "All module access removed for this tier"}
+        
+    records = [
+        {"batch_id": batch_id, "module_id": mid, "tier": payload.tier}
+        for mid in payload.module_ids
+    ]
+    
+    supabase.table("batch_module_access").insert(records).execute()
+    return {"status": "success", "count": len(payload.module_ids)}
+
+@api.get("/admin/batch/{batch_id}/module-access")
+async def get_batch_module_access(batch_id: str, user: dict = Depends(require_roles("admin"))):
+    res = supabase.table("batch_module_access").select("module_id, tier").eq("batch_id", batch_id).execute().data or []
+    
+    grouped = {"demo": [], "partial": []}
+    for r in res:
+        tier = r["tier"]
+        if tier in grouped:
+            grouped[tier].append(r["module_id"])
+            
+    return grouped
+
+@api.post("/admin/batch/{batch_id}/expire-demos")
+async def expire_demos_manually(batch_id: str, user: dict = Depends(require_roles("admin"))):
+    batch_students_data = supabase.table("batch_students").select("student_id").eq("batch_id", batch_id).execute().data or []
+    student_ids = [s["student_id"] for s in batch_students_data]
+    
+    if not student_ids:
+        return {"status": "success", "updated_count": 0}
+        
+    res = supabase.table("users").update({
+        "access_tier": "expired",
+        "demo_expired_at": iso(now_utc())
+    }).in_("id", student_ids).eq("access_tier", "demo").execute()
+    
+    return {"status": "success", "updated_count": len(res.data or [])}
+
+# --- Razorpay Payment Gateway Integration ---
+
+RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID", "rzp_test_SrKC5KJ2yJhtWF")
+RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET", "rzp_test_secret_placeholder")
+
+class RazorpayOrderIn(BaseModel):
+    amount: int
+    payment_type: Literal["partial", "full", "balance"]
+
+class RazorpayVerifyIn(BaseModel):
+    razorpay_payment_id: str
+    razorpay_order_id: str
+    razorpay_signature: str
+    payment_type: Literal["partial", "full", "balance"]
+    amount: int
+
+@api.post("/payment/create-order")
+async def create_razorpay_order(payload: RazorpayOrderIn, user: dict = Depends(get_current_user)):
+    import requests
+    import time
+    rz_payload = {
+        "amount": payload.amount * 100,  # in paise
+        "currency": "INR",
+        "receipt": f"rcpt_{user['id'][:8]}_{int(time.time())}"
+    }
+    
+    auth = (RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET)
+    try:
+        res = requests.post(
+            "https://api.razorpay.com/v1/orders",
+            json=rz_payload,
+            auth=auth,
+            timeout=10
+        )
+        if res.status_code != 200:
+            logger.error(f"Razorpay API Error: {res.text}")
+            raise HTTPException(400, f"Failed to create Razorpay order: {res.text}")
+            
+        rz_order = res.json()
+        return {
+            "id": rz_order["id"],
+            "amount": rz_order["amount"],
+            "currency": rz_order["currency"]
+        }
+    except Exception as e:
+        logger.error(f"Razorpay order creation exception: {str(e)}")
+        raise HTTPException(500, f"Internal server error when contacting Razorpay: {str(e)}")
+
+@api.post("/payment/verify")
+async def verify_razorpay_payment(payload: RazorpayVerifyIn, user: dict = Depends(get_current_user)):
+    import hmac
+    import hashlib
+    
+    # 1. Verify Razorpay Signature
+    msg = f"{payload.razorpay_order_id}|{payload.razorpay_payment_id}"
+    if RAZORPAY_KEY_SECRET == "rzp_test_secret_placeholder":
+        logger.warning("Bypassing signature check because RAZORPAY_KEY_SECRET is still a placeholder.")
+    else:
+        generated_sig = hmac.new(
+            RAZORPAY_KEY_SECRET.encode(),
+            msg.encode(),
+            hashlib.sha256
+        ).hexdigest()
+        if generated_sig != payload.razorpay_signature:
+            logger.error(f"Signature mismatch. Got: {payload.razorpay_signature}, Expected: {generated_sig}")
+            raise HTTPException(400, "Payment signature verification failed")
+
+    # 2. Record payment in the database
+    payment_record = {
+        "user_id": user["id"],
+        "amount": payload.amount,
+        "payment_type": payload.payment_type,
+        "recorded_by": None,  # Online checkout self-payment
+        "notes": f"Razorpay Payment ID: {payload.razorpay_payment_id}"
+    }
+    
+    supabase.table("payments").insert(payment_record).execute()
+    
+    # 3. Calculate new tier and total amount paid
+    current_amount_paid = user.get("amount_paid") or 0
+    new_amount_paid = current_amount_paid + payload.amount
+    
+    if payload.payment_type == "full" or new_amount_paid >= 8500:
+        new_tier = "full"
+    else:
+        new_tier = "partial"
+        
+    supabase.table("users").update({
+        "access_tier": new_tier,
+        "amount_paid": new_amount_paid,
+        "demo_expired_at": None
+    }).eq("id", user["id"]).execute()
+    
+    return {
+        "status": "success",
+        "new_tier": new_tier,
+        "total_paid": new_amount_paid
+    }
 
 app.include_router(api)
 

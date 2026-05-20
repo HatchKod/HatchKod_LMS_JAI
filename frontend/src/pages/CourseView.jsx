@@ -132,7 +132,8 @@ export default function CourseView() {
                         {openTopics[t.id] && (
                           <div className="divide-y divide-slate-100/80">
                             {(t.subtopics || []).map((s) => {
-                              const locked = user?.role === "student" && s.unlocked === false;
+                              const isTierLocked = user?.role === "student" && s.tier_locked;
+                              const locked = user?.role === "student" && (s.unlocked === false || isTierLocked);
                               const type = s.task ? "Learn & Practice" : "Learn";
                               const typeColor = s.task ? "text-emerald-700 font-bold" : "text-blue-700 font-bold";
 
@@ -179,7 +180,11 @@ export default function CourseView() {
                                   >
                                     <div className="space-y-1">
                                       <div className="text-[10px] font-black tracking-[0.2em] uppercase opacity-80">Locked</div>
-                                      <div className="text-[11px] font-bold">Complete the previous topic to unlock this one.</div>
+                                      <div className="text-[11px] font-bold">
+                                        {isTierLocked 
+                                          ? "Upgrade your tier to unlock this module." 
+                                          : "Complete the previous topic to unlock this one."}
+                                      </div>
                                     </div>
                                   </TooltipContent>
                                 </Tooltip>
