@@ -10,20 +10,43 @@ import TodaysClasses from "../components/student/TodaysClasses";
 import { Avatar, AvatarFallback } from "../components/ui/avatar";
 import StatusPill from "../components/StatusPill";
 import { Users, Award, Target, Flame, Trophy, Video, BookOpen, ListChecks, Clock, ArrowRight, TrendingUp } from "lucide-react";
+import PaymentWall from "../components/PaymentWall";
 
 export default function StudentDashboard() {
   const { user } = useAuth();
   const [data, setData] = useState(null);
   const [activeTab, setActiveTab] = useState("inprogress");
+  const [paymentStatus, setPaymentStatus] = useState(null);
 
   useEffect(() => {
     (async () => {
       try {
         const { data } = await api.get("/dashboard/student");
         setData(data);
-      } catch {}
+      } catch (err) {
+        if (err.response?.status === 403 && err.response?.data?.detail?.code === "ACCESS_EXPIRED") {
+          setPaymentStatus({ effective_tier: "expired" });
+        }
+      }
     })();
-  }, []);
+  }, [user?.access_tier]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data } = await api.get("/payment/status");
+        setPaymentStatus(data);
+      } catch (err) {
+        if (err.response?.status === 403 && err.response?.data?.detail?.code === "ACCESS_EXPIRED") {
+          setPaymentStatus({ effective_tier: "expired" });
+        }
+      }
+    })();
+  }, [user?.access_tier]);
+
+  if (paymentStatus?.effective_tier === "expired" || user?.access_tier === "expired") {
+    return <PaymentWall />;
+  }
 
   useEffect(() => {
     if (data && window.location.hash === "#courses-section") {

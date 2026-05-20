@@ -16,6 +16,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "../c
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../components/ui/tooltip";
 import Navbar from "../components/Navbar";
 import Breadcrumbs from "../components/Breadcrumbs";
+import PaymentWall from "../components/PaymentWall";
 import ReactMarkdown from "react-markdown";
 
 export default function SubtopicView() {
@@ -39,6 +40,7 @@ export default function SubtopicView() {
   const [isCompleted, setIsCompleted] = useState(false);
   const [completedAt, setCompletedAt] = useState(null);
   const [isSyllabusOpen, setIsSyllabusOpen] = useState(false);
+  const [showPaymentWall, setShowPaymentWall] = useState(false);
   const startTimeRef = useRef(Date.now());
 
   const load = async () => {
@@ -61,7 +63,21 @@ export default function SubtopicView() {
         setSubmissionType("link");
       }
     } catch (e) {
-      setError(formatApiError(e.response?.data?.detail) || "Failed to load subtopic");
+      const detail = e.response?.data?.detail;
+      if (e.response?.status === 403) {
+        if (detail && detail.code === "TIER_LOCKED") {
+          setShowPaymentWall(true);
+          return;
+        }
+        if (detail && detail.code === "ACCESS_EXPIRED") {
+          toast.error("Your trial access has expired. Please make payment.");
+        } else {
+          toast.error(typeof detail === "string" ? detail : (detail?.message || "This module is not included in your current plan."));
+        }
+        navigate("/dashboard");
+        return;
+      }
+      setError(formatApiError(detail) || "Failed to load subtopic");
     }
   };
 
@@ -242,6 +258,10 @@ export default function SubtopicView() {
         </div>
       </div>
     );
+  }
+
+  if (showPaymentWall) {
+    return <PaymentWall />;
   }
 
   if (!data || !data.subtopic) {
