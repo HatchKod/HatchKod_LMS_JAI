@@ -1,4 +1,4 @@
-# HatchKod LMS 
+# HatchKod LMS
 
 HatchKod LMS is a full-stack learning management system built with React (Frontend), FastAPI (Backend), and Supabase (Database).
 
@@ -91,3 +91,5 @@ Whenever you pull the latest code from Git, ensure you sync your dependencies to
    cd backend
    pip install -r requirements.txt
    ```
+
+## Test
