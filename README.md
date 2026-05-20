@@ -1,4 +1,4 @@
-# HatchKod LMS
+# HatchKod LMS 
 
 HatchKod LMS is a full-stack learning management system built with React (Frontend), FastAPI (Backend), and Supabase (Database).
 
