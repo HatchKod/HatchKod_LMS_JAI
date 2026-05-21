@@ -1794,7 +1794,8 @@ async def student_dashboard(user: dict = Depends(require_roles("student"))):
         # 5. Gamification rank
         rank = 1
         try:
-            rank_res = supabase.table("users").select("id", count="exact").eq("role", "student").gt("total_xp", user.get("total_xp", 0)).execute()
+            sync_student_xp(user)
+            rank_res = supabase.table("users").select("id", count="exact").eq("role", "student").eq("is_active", True).gt("total_xp", user.get("total_xp", 0)).execute()
             rank = (rank_res.count or 0) + 1
         except: pass
 
