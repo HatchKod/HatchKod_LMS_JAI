@@ -8,6 +8,7 @@ import { useAuth } from "../lib/auth";
 import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from "../components/ui/tooltip";
 import { toast } from "sonner";
 import { supabase } from "../lib/supabase";
+import PaymentWall from "../components/PaymentWall";
 
 export default function CourseView() {
   const { id } = useParams();
@@ -15,6 +16,21 @@ export default function CourseView() {
   const [course, setCourse] = useState(null);
   const [openModules, setOpenModules] = useState({});
   const [openTopics, setOpenTopics] = useState({});
+  const [paymentStatus, setPaymentStatus] = useState(null);
+
+  useEffect(() => {
+    if (user?.role !== "student") return;
+    (async () => {
+      try {
+        const { data } = await api.get("/payment/status");
+        setPaymentStatus(data);
+      } catch (err) {
+        if (err.response?.status === 403 && err.response?.data?.detail?.code === "ACCESS_EXPIRED") {
+          setPaymentStatus({ effective_tier: "expired" });
+        }
+      }
+    })();
+  }, [user?.access_tier, user?.role]);
 
   const load = async () => {
     const { data } = await api.get(`/courses/${id}`);
@@ -42,6 +58,10 @@ export default function CourseView() {
       .subscribe();
     return () => supabase.removeChannel(channel);
   }, [id]);
+
+  if (user?.role === "student" && (paymentStatus?.effective_tier === "expired" || user?.access_tier === "expired")) {
+    return <PaymentWall />;
+  }
 
   if (!course) {
     return (

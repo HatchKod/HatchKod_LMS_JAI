@@ -48,6 +48,10 @@ export default function SubtopicView() {
     try {
       const res = await api.get(`/subtopics/${id}`);
       setData(res.data);
+      if (res.data.is_completed !== undefined) {
+        setIsCompleted(res.data.is_completed);
+        setCompletedAt(res.data.completed_at);
+      }
       if (res.data.submission) {
         const sUrl = res.data.submission.submission_url || "";
         setUrl(sUrl);
@@ -80,19 +84,6 @@ export default function SubtopicView() {
       setError(formatApiError(detail) || "Failed to load subtopic");
     }
   };
-
-  // Check completion status and track time
-  useEffect(() => {
-    if (!user?.id || !id) return;
-    api.get(`/students/${user.id}/progress`).then(({ data }) => {
-      const allSubtopics = (data.modules || []).flatMap(m => m.topics || []).flatMap(t => t.subtopics || []);
-      const found = allSubtopics.find(s => s.id === id);
-      if (found) {
-        setIsCompleted(found.is_completed);
-        setCompletedAt(found.completed_at);
-      }
-    }).catch(() => {});
-  }, [user?.id, id]);
 
   // Time tracking via Page Visibility API
   useEffect(() => {

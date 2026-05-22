@@ -27,6 +27,7 @@ import StudentProgress from "./pages/StudentProgress";
 import ImageLibrary from "./pages/ImageLibrary";
 import PaymentAdmin from "./pages/admin/PaymentAdmin";
 import StudentBilling from "./pages/StudentBilling";
+import StudentReferral from "./pages/StudentReferral";
 
 
 export default function App() {
@@ -38,6 +39,7 @@ export default function App() {
             <Routes>
               <Route path="/" element={<Landing />} />
               <Route path="/login" element={<Login />} />
+              <Route path="/register" element={<Register />} />
               <Route path="/dashboard" element={
                 <ProtectedRoute roles={["student"]}><StudentDashboard /></ProtectedRoute>
               } />
@@ -99,6 +101,9 @@ export default function App() {
               } />
               <Route path="/billing" element={
                 <ProtectedRoute><StudentBilling /></ProtectedRoute>
+              } />
+              <Route path="/referrals" element={
+                <ProtectedRoute roles={["student"]}><StudentReferral /></ProtectedRoute>
               } />
             </Routes>
           </BrowserRouter>

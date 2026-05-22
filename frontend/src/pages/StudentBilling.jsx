@@ -8,7 +8,7 @@ import { fetchPaymentStatus, fetchMyPaymentHistory, createRazorpayOrder, verifyR
 import { 
   CreditCard, Loader2, Calendar, CheckCircle2, ShieldCheck, 
   HelpCircle, ArrowUpRight, History, Receipt, IndianRupee,
-  Clock, AlertTriangle
+  Clock, AlertTriangle, Tag, X, ChevronDown, ChevronUp
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -17,6 +17,42 @@ export default function StudentBilling() {
   const [status, setStatus] = useState(null);
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // Referral code state
+  const [refExpanded, setRefExpanded] = useState(false);
+  const [refInput, setRefInput] = useState("");
+  const [refApplied, setRefApplied] = useState(null); // { code, referrer_name, discount }
+  const [refLoading, setRefLoading] = useState(false);
+
+  // Auto-fill referral code from localStorage if captured at register
+  useEffect(() => {
+    const saved = localStorage.getItem("hk_ref");
+    if (saved) {
+      setRefInput(saved);
+      setRefExpanded(true);
+    }
+  }, []);
+
+  const handleApplyReferral = async () => {
+    if (!refInput.trim()) return;
+    setRefLoading(true);
+    try {
+      const res = await api.post("/referral/validate", { code: refInput.trim() });
+      setRefApplied({ code: refInput.trim(), referrer_name: res.data.referrer_name, discount: res.data.discount });
+      toast.success(`Referral code applied! ₹${res.data.discount} discount from ${res.data.referrer_name}`);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Invalid referral code.");
+      setRefApplied(null);
+    } finally {
+      setRefLoading(false);
+    }
+  };
+
+  const clearReferral = () => {
+    setRefApplied(null);
+    setRefInput("");
+    localStorage.removeItem("hk_ref");
+  };
 
   const loadData = async () => {
     try {
@@ -55,7 +91,9 @@ export default function StudentBilling() {
         return;
       }
 
-      const order = await createRazorpayOrder({ amount, payment_type: paymentType });
+      const orderPayload = { amount: amount, payment_type: paymentType };
+      if (refApplied?.code) orderPayload.referral_code = refApplied.code;
+      const order = await createRazorpayOrder(orderPayload);
       
       const options = {
         key: "rzp_test_SrKC5KJ2yJhtWF",
@@ -76,6 +114,7 @@ export default function StudentBilling() {
             const res = await verifyRazorpayPayment(verifyPayload);
             if (res.status === "success") {
               toast.success("Payment verified! Refreshing your account…");
+              localStorage.removeItem("hk_ref"); // Clear referral after successful payment
             } else {
               toast.error("Payment verification failed.");
             }
@@ -201,7 +240,81 @@ export default function StudentBilling() {
                     Complete your payment online to gain instant, automated access to additional syllabus courses, lab models, and mentor support.
                   </p>
 
-                  <div className="flex flex-col sm:flex-row gap-4 pt-2">
+                  {/* Referral Code Section */}
+                  <div className="border border-[#222] bg-[#0A0A0A]">
+                    {user?.referred_by && status?.amount_paid > 0 ? (
+                      <div className="w-full flex items-center justify-between px-4 py-3 text-xs text-slate-400">
+                        <span className="flex items-center gap-2 font-mono font-bold uppercase tracking-wider">
+                          <Tag className="h-3.5 w-3.5 text-slate-500" />
+                          <span className="text-slate-500">Referral Code Already Used ({user.referred_by})</span>
+                        </span>
+                      </div>
+                    ) : (
+                      <>
+                        <button
+                          onClick={() => setRefExpanded(!refExpanded)}
+                          className="w-full flex items-center justify-between px-4 py-3 text-xs text-slate-400 hover:text-white transition-colors"
+                        >
+                          <span className="flex items-center gap-2 font-mono font-bold uppercase tracking-wider">
+                            <Tag className="h-3.5 w-3.5 text-[#194BFB]" />
+                            {refApplied ? (
+                              <span className="text-emerald-400">✓ Referral Applied — ₹{refApplied.discount} OFF</span>
+                            ) : user?.referred_by && status?.amount_paid === 0 ? (
+                              <span className="text-emerald-400">✓ Referral Applied ({user.referred_by}) — ₹500 OFF</span>
+                            ) : (
+                              "Have a referral code? Save ₹500"
+                            )}
+                          </span>
+                          {refExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                        </button>
+
+                        {refExpanded && (
+                          <div className="px-4 pb-4 border-t border-[#222] pt-3">
+                            {refApplied ? (
+                              <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-500/20 px-3 py-2">
+                                <div>
+                                  <span className="text-emerald-400 text-xs font-bold font-mono">{refApplied.code}</span>
+                                  <span className="text-slate-400 text-xs ml-2">from {refApplied.referrer_name}</span>
+                                </div>
+                                <button onClick={clearReferral} className="text-slate-500 hover:text-red-400 transition-colors">
+                                  <X className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            ) : user?.referred_by && status?.amount_paid === 0 ? (
+                               <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-500/20 px-3 py-2">
+                                <div>
+                                  <span className="text-emerald-400 text-xs font-bold font-mono">{user.referred_by}</span>
+                                  <span className="text-slate-400 text-xs ml-2">Referral discount automatically applied to your first payment.</span>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="flex gap-2">
+                                <input
+                                  type="text"
+                                  value={refInput}
+                                  onChange={e => setRefInput(e.target.value.toUpperCase())}
+                                  placeholder="e.g. HK-AB12CD"
+                                  className="flex-1 bg-[#111] border border-[#333] text-white text-xs font-mono px-3 py-2 focus:outline-none focus:border-[#194BFB] uppercase"
+                                />
+                                <Button
+                                  onClick={handleApplyReferral}
+                                  disabled={refLoading || !refInput.trim()}
+                                  className="bg-[#194BFB] hover:bg-[#194BFB]/80 text-white text-xs font-bold uppercase tracking-wider rounded-none h-auto px-4"
+                                >
+                                  {refLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Apply"}
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+
+                  {(() => {
+                    const effectiveDiscount = refApplied?.discount || (user?.referred_by && status?.amount_paid === 0 ? 500 : 0);
+                    return (
+                      <div className="flex flex-col sm:flex-row gap-4 pt-2">
                     {status?.access_tier === "partial" ? (
                       <Button
                         onClick={() => handlePayOnline(status.pricing.balance_amount, "balance")}
@@ -217,18 +330,22 @@ export default function StudentBilling() {
                           className="flex-1 bg-transparent border border-[#333] hover:bg-[#194BFB] hover:text-white text-xs font-bold tracking-wider uppercase rounded-none h-11 transition-all flex items-center justify-center gap-2"
                         >
                           <CreditCard className="h-4 w-4" />
-                          Pay Partial ₹{status.pricing.partial_amount.toLocaleString("en-IN")}
+                          Pay Partial ₹{Math.max(0, status.pricing.partial_amount - effectiveDiscount).toLocaleString("en-IN")}
+                          {effectiveDiscount > 0 && <span className="line-through text-slate-400 text-[10px]">₹{status.pricing.partial_amount.toLocaleString("en-IN")}</span>}
                         </Button>
                         <Button
                           onClick={() => handlePayOnline(status.pricing.full_amount, "full")}
                           className="flex-1 bg-[#194BFB] hover:bg-[#194BFB]/80 text-white text-xs font-bold tracking-wider uppercase rounded-none h-11 transition-all flex items-center justify-center gap-2"
                         >
                           <CreditCard className="h-4 w-4" />
-                          Pay Full ₹{status.pricing.full_amount.toLocaleString("en-IN")}
+                          Pay Full ₹{Math.max(0, status.pricing.full_amount - effectiveDiscount).toLocaleString("en-IN")}
+                          {effectiveDiscount > 0 && <span className="line-through text-slate-400 text-[10px]">₹{status.pricing.full_amount.toLocaleString("en-IN")}</span>}
                         </Button>
                       </>
                     )}
                   </div>
+                    );
+                  })()}
                 </div>
               )}
             </Card>

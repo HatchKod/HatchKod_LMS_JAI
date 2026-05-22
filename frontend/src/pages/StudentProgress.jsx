@@ -7,8 +7,10 @@ import { toast } from "sonner";
 import {
   BookOpen, Clock, Layers, Calendar, Trophy,
   ChevronDown, ChevronRight, CheckCircle, Circle,
-  PlayCircle, ArrowRight
+  PlayCircle, ArrowRight, Lock
 } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../components/ui/tooltip";
+import PaymentWall from "../components/PaymentWall";
 
 // Helper: format date as "12 May"
 function fmtDate(iso) {
@@ -68,6 +70,21 @@ export default function StudentProgress() {
   const [loading, setLoading] = useState(true);
   const [expandedModules, setExpandedModules] = useState({});
   const [expandedTopics, setExpandedTopics] = useState({});
+  const [paymentStatus, setPaymentStatus] = useState(null);
+
+  useEffect(() => {
+    if (user?.role !== "student" || paramStudentId) return;
+    (async () => {
+      try {
+        const { data } = await api.get("/payment/status");
+        setPaymentStatus(data);
+      } catch (err) {
+        if (err.response?.status === 403 && err.response?.data?.detail?.code === "ACCESS_EXPIRED") {
+          setPaymentStatus({ effective_tier: "expired" });
+        }
+      }
+    })();
+  }, [user?.access_tier, user?.role, paramStudentId]);
 
   const fetchProgress = useCallback(async () => {
     const targetId = paramStudentId || user?.id;
@@ -191,6 +208,10 @@ export default function StudentProgress() {
     setExpandedTopics(prev => ({ ...prev, [topicId]: !prev[topicId] }));
   };
 
+  if (user?.role === "student" && (paymentStatus?.effective_tier === "expired" || user?.access_tier === "expired")) {
+    return <PaymentWall />;
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen bg-white font-['IBM_Plex_Sans']">
@@ -287,23 +308,52 @@ export default function StudentProgress() {
                 <p className="text-[10px] uppercase text-slate-400 mb-1 tracking-wider">
                   {paramStudentId ? "Current Incomplete Topic" : "Continue where you left off"}
                 </p>
-                {displayCurrentTopic ? (
-                  <div className="bg-blue-50 border border-blue-100 rounded-sm p-3 flex items-center gap-3">
-                    <BookOpen className="text-[#194BFB] w-5 h-5 shrink-0" />
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm font-medium text-slate-800 truncate">{displayCurrentTopic.topic_title}</div>
-                      <div className="text-xs text-slate-500 truncate">{displayCurrentTopic.module_title}</div>
+                {displayCurrentTopic ? (() => {
+                  // Check if the current subtopic's module is tier-locked or lacks batch access
+                  const currentModuleName = displayCurrentTopic.module_title;
+                  const currentModule = modules.find(m => m.title === currentModuleName);
+                  let isCurrentLocked = currentModule?.tier_locked === true;
+
+                  if (!isCurrentLocked && current_subtopic?.subtopic_id) {
+                    const foundSubtopic = currentModule?.topics?.flatMap(t => t.subtopics)?.find(s => s.id === current_subtopic.subtopic_id);
+                    if (foundSubtopic && foundSubtopic.unlocked === false) {
+                      isCurrentLocked = true;
+                    }
+                  }
+
+                  return isCurrentLocked ? (
+                    <div className="bg-slate-50 border border-slate-200 rounded-sm p-3 flex items-center gap-3">
+                      <Lock className="text-slate-400 w-5 h-5 shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium text-slate-500 truncate">{displayCurrentTopic.topic_title}</div>
+                        <div className="text-xs text-slate-400 truncate">{displayCurrentTopic.module_title}</div>
+                      </div>
+                      <span className="ml-auto text-[10px] text-slate-400 bg-slate-100 border border-slate-200 px-2 py-1 rounded font-bold uppercase tracking-wider">
+                        Module Locked
+                      </span>
                     </div>
-                    {!paramStudentId && (
-                      <button
-                        onClick={() => navigate(`/course/${progressData.course_id}`)}
-                        className="ml-auto bg-[#194BFB] text-white text-xs px-3 py-1.5 rounded-sm shrink-0 hover:bg-[#0F3AE5] transition-colors"
-                      >
-                        Continue →
-                      </button>
-                    )}
-                  </div>
-                ) : (
+                  ) : (
+                    <div className="bg-blue-50 border border-blue-100 rounded-sm p-3 flex items-center gap-3">
+                      <BookOpen className="text-[#194BFB] w-5 h-5 shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium text-slate-800 truncate">{displayCurrentTopic.topic_title}</div>
+                        <div className="text-xs text-slate-500 truncate">{displayCurrentTopic.module_title}</div>
+                      </div>
+                      {!paramStudentId && (
+                        <button
+                          onClick={() => navigate(
+                            current_subtopic?.subtopic_id
+                              ? `/subtopic/${current_subtopic.subtopic_id}`
+                              : `/dashboard`
+                          )}
+                          className="ml-auto bg-[#194BFB] text-white text-xs px-3 py-1.5 rounded-sm shrink-0 hover:bg-[#0F3AE5] transition-colors"
+                        >
+                          Continue →
+                        </button>
+                      )}
+                    </div>
+                  );
+                })() : (
                   <div className="bg-yellow-50 border border-yellow-100 rounded-sm p-3 flex items-center gap-3">
                     <Trophy className="text-yellow-500 w-5 h-5" />
                     <span className="text-sm font-semibold text-slate-800">Course Complete! 🎉</span>
@@ -417,6 +467,30 @@ export default function StudentProgress() {
                             <div className="divide-y divide-slate-50 bg-white">
                               {(topic.subtopics || []).map((s) => {
                                 const isCurrent = current_topic?.topic_id === s.id;
+                                const isModLocked = mod.tier_locked && !s.is_completed;
+
+                                if (isModLocked) {
+                                  return (
+                                    <TooltipProvider key={s.id}>
+                                      <Tooltip>
+                                        <TooltipTrigger asChild>
+                                          <div
+                                            className="flex items-center gap-3 py-3 pl-14 pr-5 opacity-50 cursor-not-allowed bg-slate-50/50 group"
+                                          >
+                                            <Lock className="text-slate-400 w-4 h-4 shrink-0" />
+                                            <span className="text-sm truncate flex-1 text-slate-400">{s.title}</span>
+                                            <span className="ml-auto text-[10px] text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded font-semibold uppercase tracking-wider">Locked</span>
+                                          </div>
+                                        </TooltipTrigger>
+                                        <TooltipContent side="right" className="bg-slate-800 text-white border-none rounded-md p-3 shadow-xl max-w-[200px]">
+                                          <div className="text-[10px] font-black tracking-[0.2em] uppercase opacity-70 mb-1">Tier Locked</div>
+                                          <div className="text-[11px] font-medium">Upgrade your plan to access this module.</div>
+                                        </TooltipContent>
+                                      </Tooltip>
+                                    </TooltipProvider>
+                                  );
+                                }
+
                                 return (
                                   <div
                                     key={s.id}

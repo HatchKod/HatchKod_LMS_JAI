@@ -11,6 +11,7 @@ import { Avatar, AvatarFallback } from "../components/ui/avatar";
 import StatusPill from "../components/StatusPill";
 import { Users, Award, Target, Flame, Trophy, Video, BookOpen, ListChecks, Clock, ArrowRight, TrendingUp } from "lucide-react";
 import PaymentWall from "../components/PaymentWall";
+import { supabase } from "../lib/supabase";
 
 export default function StudentDashboard() {
   const { user } = useAuth();
@@ -18,18 +19,33 @@ export default function StudentDashboard() {
   const [activeTab, setActiveTab] = useState("inprogress");
   const [paymentStatus, setPaymentStatus] = useState(null);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const { data } = await api.get("/dashboard/student");
-        setData(data);
-      } catch (err) {
-        if (err.response?.status === 403 && err.response?.data?.detail?.code === "ACCESS_EXPIRED") {
-          setPaymentStatus({ effective_tier: "expired" });
-        }
+  const fetchDashboardData = async () => {
+    try {
+      const { data } = await api.get("/dashboard/student");
+      setData(data);
+    } catch (err) {
+      if (err.response?.status === 403 && err.response?.data?.detail?.code === "ACCESS_EXPIRED") {
+        setPaymentStatus({ effective_tier: "expired" });
       }
-    })();
-  }, [user?.access_tier]);
+    }
+  };
+
+  useEffect(() => {
+    fetchDashboardData();
+    
+    if (user?.id) {
+      const channel = supabase.channel('student_batch_realtime')
+        .on('postgres_changes', {
+          event: 'INSERT', schema: 'public', table: 'batch_students',
+          filter: `student_id=eq.${user.id}`
+        }, () => {
+          fetchDashboardData();
+        })
+        .subscribe();
+        
+      return () => supabase.removeChannel(channel);
+    }
+  }, [user?.access_tier, user?.id]);
 
   useEffect(() => {
     (async () => {
@@ -112,7 +128,8 @@ export default function StudentDashboard() {
         {data.next_topic && activeTab === "inprogress" && (() => {
           const pending = (data.pending_submissions || []).find(s => s.topic_id === data.next_topic.topic.id);
           const nextSubtopicId = data.next_topic.subtopic?.id;
-          
+          const isNextLocked = data.next_topic.subtopic?.tier_locked === true || data.next_topic.subtopic?.unlocked === false;
+
           return (
             <div className="mb-12">
               <div className="text-[10px] uppercase tracking-[0.22em] text-slate-400 font-bold mb-4">CONTINUE LEARNING</div>
@@ -120,7 +137,12 @@ export default function StudentDashboard() {
                 <div className="grid grid-cols-1 md:grid-cols-3">
                   <div className="md:col-span-2 p-8">
                     <div className="flex items-center gap-3 mb-3">
-                      {pending ? (
+                      {isNextLocked ? (
+                        <div className="bg-slate-100 text-slate-500 border border-slate-200 px-2 py-0.5 rounded-sm text-[9px] font-bold uppercase tracking-widest flex items-center gap-1">
+                          <BookOpen className="h-2.5 w-2.5" />
+                          Module Locked
+                        </div>
+                      ) : pending ? (
                         <div className="bg-amber-50 text-[#F59E0B] border border-amber-100 px-2 py-0.5 rounded-sm text-[9px] font-bold uppercase tracking-widest flex items-center gap-1">
                           <Clock className="h-2.5 w-2.5" />
                           Under Review
@@ -133,23 +155,37 @@ export default function StudentDashboard() {
                     <div className="font-[Outfit] text-2xl font-bold tracking-tight text-slate-900" data-testid="next-topic-title">
                       {data.next_topic.topic.title}
                     </div>
-                    <p className="mt-2 text-sm text-slate-500 line-clamp-1 italic">"The only way to learn a new programming language is by writing programs in it."</p>
-                    <Button asChild className={`mt-8 rounded-sm px-8 h-12 ${pending ? 'bg-slate-100 text-slate-900 hover:bg-slate-200 shadow-none border border-slate-200' : 'bg-[#194BFB] hover:bg-[#0F3AE5]'}`} data-testid="continue-learning-btn">
-                      <Link to={nextSubtopicId ? `/subtopic/${nextSubtopicId}` : `/course/${data.next_topic.course.id}`}>
-                        {pending ? "View Submission" : "Resume Learning"} <ArrowRight className="ml-2 h-4 w-4" />
-                      </Link>
-                    </Button>
+                    <p className="mt-2 text-sm text-slate-500 line-clamp-1 italic">
+                      {isNextLocked
+                        ? "This module requires an upgraded plan. Contact your mentor to unlock access."
+                        : '"The only way to learn a new programming language is by writing programs in it."'}
+                    </p>
+                    {isNextLocked ? (
+                      <Button asChild className="mt-8 rounded-sm px-8 h-12 bg-slate-100 text-slate-700 hover:bg-slate-200 shadow-none border border-slate-200" data-testid="continue-learning-btn">
+                        <Link to={`/course/${data.next_topic.course.id}`}>
+                          View Syllabus <ArrowRight className="ml-2 h-4 w-4" />
+                        </Link>
+                      </Button>
+                    ) : (
+                      <Button asChild className={`mt-8 rounded-sm px-8 h-12 ${pending ? 'bg-slate-100 text-slate-900 hover:bg-slate-200 shadow-none border border-slate-200' : 'bg-[#194BFB] hover:bg-[#0F3AE5]'}`} data-testid="continue-learning-btn">
+                        <Link to={nextSubtopicId ? `/subtopic/${nextSubtopicId}` : `/course/${data.next_topic.course.id}`}>
+                          {pending ? "View Submission" : "Resume Learning"} <ArrowRight className="ml-2 h-4 w-4" />
+                        </Link>
+                      </Button>
+                    )}
                   </div>
                   <div className="border-l border-border bg-[#0A0A0A] text-white p-8 font-mono text-xs flex flex-col justify-center">
                     <div className="text-slate-500">// system_status</div>
-                    <div className={`${pending ? 'text-amber-400' : 'text-emerald-400'} mt-1`}>▸ {pending ? 'pending_approval' : 'ready_to_build'}</div>
+                    <div className={`${isNextLocked ? 'text-slate-500' : pending ? 'text-amber-400' : 'text-emerald-400'} mt-1`}>
+                      ▸ {isNextLocked ? 'tier_locked' : pending ? 'pending_approval' : 'ready_to_build'}
+                    </div>
                     <div className="text-slate-500 mt-4">// next_execution</div>
-                    <div className="text-[#9bb6ff] mt-1 italic cursor-pointer hover:underline">
-                      {pending ? 'wait_for_mentor()' : `open_topic("${data.next_topic.topic.title.toLowerCase().replace(/ /g, "_")}")`}
+                    <div className="text-[#9bb6ff] mt-1 italic">
+                      {isNextLocked ? 'upgrade_plan()' : pending ? 'wait_for_mentor()' : `open_topic("${data.next_topic.topic.title.toLowerCase().replace(/ /g, "_")}")`}
                     </div>
                     <div className="mt-8 pt-4 border-t border-white/10 flex items-center gap-2 text-slate-400">
-                      <div className={`h-2 w-2 rounded-full ${pending ? 'bg-amber-500' : 'bg-emerald-500'} animate-pulse`}></div>
-                      <span>{pending ? 'Waiting' : 'Active Session'}</span>
+                      <div className={`h-2 w-2 rounded-full ${isNextLocked ? 'bg-slate-500' : pending ? 'bg-amber-500' : 'bg-emerald-500'} ${isNextLocked ? '' : 'animate-pulse'}`}></div>
+                      <span>{isNextLocked ? 'Locked' : pending ? 'Waiting' : 'Active Session'}</span>
                     </div>
                   </div>
                 </div>

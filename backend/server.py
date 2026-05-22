@@ -142,7 +142,8 @@ def award_xp(user_id: str, action_type: str):
             "lesson_completed": 20,
             "quiz_passed": 40,
             "project_approved": 150,
-            "problem_solved": 50
+            "problem_solved": 50,
+            "referral_bonus": 100
         }
         xp_to_award = xp_map.get(action_type, 0)
         if xp_to_award == 0:
@@ -350,6 +351,7 @@ class RegisterIn(BaseModel):
     email: EmailStr
     password: str = Field(min_length=6)
     role: Literal["student", "mentor"] = "student"  # admin must be seeded
+    ref_code: Optional[str] = None  # referral code from URL
 
 
 class LoginIn(BaseModel):
@@ -583,6 +585,16 @@ class BatchStudentIn(BaseModel):
     student_id: str
 
 
+def generate_referral_code():
+    import random, string
+    chars = string.ascii_uppercase + string.digits
+    while True:
+        code = "HK-" + "".join(random.choices(chars, k=6))
+        existing = supabase.table("users").select("id").eq("referral_code", code).execute()
+        if not existing.data:
+            return code
+
+
 # -------------------- Auth Endpoints --------------------
 @api.post("/auth/register")
 async def register(payload: RegisterIn, response: Response, background_tasks: BackgroundTasks):
@@ -591,6 +603,7 @@ async def register(payload: RegisterIn, response: Response, background_tasks: Ba
     if existing.data:
         raise HTTPException(status_code=400, detail="Email already registered")
     user_id = str(uuid.uuid4())
+    referral_code_gen = generate_referral_code()
     user_doc = {
         "id": user_id,
         "name": payload.name,
@@ -599,8 +612,31 @@ async def register(payload: RegisterIn, response: Response, background_tasks: Ba
         "role": payload.role,
         "assigned_mentor_id": None,
         "created_at": iso(now_utc()),
+        "referral_code": referral_code_gen,
     }
+
+    # Track referral at registration time
+    referrer_id = None
+    if payload.ref_code:
+        ref_code = payload.ref_code.strip()
+        referrer = get_single_or_none(supabase.table("users").select("id").eq("referral_code", ref_code))
+        if referrer and referrer["id"] != user_id:
+            user_doc["referred_by"] = ref_code
+            referrer_id = referrer["id"]
+
     supabase.table("users").insert(user_doc).execute()
+
+    # Create referral record at registration stage
+    if referrer_id:
+        supabase.table("referrals").insert({
+            "referrer_id": referrer_id,
+            "referred_id": user_id,
+            "code": payload.ref_code.strip(),
+            "status": "pending",
+            "payout_amount": 1500,
+            "discount_applied": 0,
+        }).execute()
+
     background_tasks.add_task(call_onboarding_lambda, payload.name, email, payload.password)
     token = create_token(user_id, email, payload.role)
     set_auth_cookie(response, token)
@@ -1071,11 +1107,50 @@ async def get_subtopic(subtopic_id: str, user: dict = Depends(require_active_acc
         module_raw = module_res.data or {}
         course_id = module_raw.get("course_id")
     
-    # Safely fetch course structure
-    course_data = {}
-    if course_id:
-        course_data = await get_course(course_id, user)
+    # Safely fetch course structure for sidebar navigation (lightweight)
+    course_data = {"modules": []}
+    is_completed = False
+    completed_at = None
     
+    if course_id:
+        try:
+            uuid.UUID(course_id)
+            # Lightweight structure fetch (1 nested query)
+            modules_raw = supabase.table("modules").select(
+                "id, title, sequence_order, topics(id, title, sequence_order, subtopics(id, title, sequence_order, is_published))"
+            ).eq("course_id", course_id).order("sequence_order").execute().data or []
+            
+            # Fetch progress ONLY for this user & course (single query)
+            progress_set = set()
+            if user["role"] == "student":
+                st_ids = []
+                for m in modules_raw:
+                    for t in m.get("topics", []):
+                        for s in t.get("subtopics", []):
+                            st_ids.append(s["id"])
+                if st_ids:
+                    prog_res = supabase.table("student_progress").select("subtopic_id, is_completed, completed_at").eq("student_id", user["id"]).in_("subtopic_id", st_ids).execute().data or []
+                    progress_set = {p["subtopic_id"]: p for p in prog_res if p.get("is_completed")}
+                    
+                    if subtopic_id in progress_set:
+                        is_completed = True
+                        completed_at = progress_set[subtopic_id].get("completed_at")
+
+            # Build course structure with completion flags
+            for m in modules_raw:
+                m["topics"] = sorted(m.get("topics") or [], key=lambda t: t.get("sequence_order") or 0)
+                for t in m["topics"]:
+                    t["subtopics"] = sorted(t.get("subtopics") or [], key=lambda s: s.get("sequence_order") or 0)
+                    for s in t["subtopics"]:
+                        s["completed"] = s["id"] in progress_set
+            
+            course_data = {"modules": modules_raw, "id": course_id}
+            
+        except (ValueError, AttributeError):
+            logger.warning(f"Invalid course_id '{course_id}' in subtopic lookup — skipping course fetch.")
+        except Exception as e:
+            logger.warning(f"Could not load course {course_id} for subtopic: {e}")
+
     task = subtopic["tasks"][0] if subtopic.get("tasks") and len(subtopic["tasks"]) > 0 else None
     submission = None
     
@@ -1117,7 +1192,9 @@ async def get_subtopic(subtopic_id: str, user: dict = Depends(require_active_acc
         "next_subtopic": next_sub,
         "prev_subtopic": prev_sub,
         "total_subtopics": len(all_subtopics),
-        "subtopic_index": subtopic_index
+        "subtopic_index": subtopic_index,
+        "is_completed": is_completed,
+        "completed_at": completed_at
     }
 
 # -------------------- Tasks --------------------
@@ -1722,6 +1799,7 @@ async def student_dashboard(user: dict = Depends(require_roles("student"))):
         enroll_res = supabase.table("batch_students").select("batch_id, batches(course_id, mentor_id)").eq("student_id", user["id"]).execute()
         course_ids = list({e["batches"]["course_id"] for e in enroll_res.data if e.get("batches") and e["batches"].get("course_id")})
         mentor_ids = list({e["batches"]["mentor_id"] for e in enroll_res.data if e.get("batches") and e["batches"].get("mentor_id")})
+        batch_ids = [e["batch_id"] for e in enroll_res.data if e.get("batch_id")]
         
         if not course_ids:
             return {
@@ -1738,31 +1816,69 @@ async def student_dashboard(user: dict = Depends(require_roles("student"))):
                 }
             }
 
-        # 2. Parallel fetch essential data
+        # 2. Parallel fetch essential data AND full structure in one nested query
         import asyncio
         async def fetch_data():
             courses_t = asyncio.to_thread(lambda: supabase.table("courses").select("*").eq("is_published", True).in_("id", course_ids).execute().data or [])
-            progress_t = asyncio.to_thread(lambda: supabase.table("student_progress").select("*").eq("student_id", user["id"]).eq("is_completed", True).execute().data or [])
+            progress_t = asyncio.to_thread(lambda: supabase.table("student_progress").select("subtopic_id").eq("student_id", user["id"]).eq("is_completed", True).execute().data or [])
             mentor_t = asyncio.to_thread(lambda: supabase.table("users").select("id, name, email").in_("id", mentor_ids).execute().data or [] if mentor_ids else [])
-            pending_t = asyncio.to_thread(lambda: supabase.table("submissions").select("*").eq("student_id", user["id"]).in_("status", ["pending", "rework"]).execute().data or [])
-            return await asyncio.gather(courses_t, progress_t, mentor_t, pending_t)
+            pending_t = asyncio.to_thread(lambda: supabase.table("submissions").select("*, subtopics(id, title)").eq("student_id", user["id"]).in_("status", ["pending", "rework"]).execute().data or [])
+            # Single nested query replaces N sequential get_course() calls
+            structure_t = asyncio.to_thread(lambda: supabase.table("modules")
+                .select("id, title, sequence_order, course_id, topics(id, title, sequence_order, subtopics(id, title, sequence_order, is_published))")
+                .in_("course_id", course_ids)
+                .order("sequence_order")
+                .execute().data or [])
+            return await asyncio.gather(courses_t, progress_t, mentor_t, pending_t, structure_t)
 
-        courses, progress_records, mentor_data, pending_subs = await fetch_data()
+        courses, progress_records, mentor_data, pending_subs, all_modules_raw = await fetch_data()
         progress_set = {p["subtopic_id"] for p in progress_records if p.get("subtopic_id")}
         mentor = mentor_data[0] if mentor_data else None
 
-        # 3. Process each course
+        # Determine tier access in one batch query (no per-course queries)
+        effective_tier = get_effective_tier(user)
+        allowed_module_ids = set()
+        if effective_tier not in ("full", "expired") and batch_ids:
+            bma_res = supabase.table("batch_module_access").select("module_id").in_("batch_id", batch_ids).eq("tier", effective_tier).execute().data or []
+            allowed_module_ids = {r["module_id"] for r in bma_res}
+
+        # Build in-memory lookup maps from nested structure
+        modules_by_course = {}
+        for m in all_modules_raw:
+            cid = m["course_id"]
+            if cid not in modules_by_course:
+                modules_by_course[cid] = []
+            
+            # Resolve tier lock per module
+            if effective_tier == "full":
+                m["tier_locked"] = False
+            elif effective_tier == "expired":
+                m["tier_locked"] = True
+            else:
+                m["tier_locked"] = m["id"] not in allowed_module_ids
+            
+            # Sort nested topics and subtopics, mark completion
+            topics = sorted(m.get("topics") or [], key=lambda t: t.get("sequence_order") or 0)
+            for t in topics:
+                subs = sorted(t.get("subtopics") or [], key=lambda s: s.get("sequence_order") or 0)
+                for s in subs:
+                    s["completed"] = s["id"] in progress_set
+                t["subtopics"] = subs
+            m["topics"] = topics
+            modules_by_course[cid].append(m)
+
+        # 3. Process each course using in-memory data
         result_courses = []
         next_topic_data = None
 
         for course in courses:
-            c_data = await get_course(course["id"], user)
+            mods = modules_by_course.get(course["id"], [])
+            module_count = len(mods)
             all_st = []
-            module_count = len(c_data.get("modules", []))
-            for m in c_data.get("modules", []):
+            for m in mods:
                 for t in m.get("topics", []):
                     for s in t.get("subtopics", []):
-                        all_st.append({"subtopic": s, "topic": t})
+                        all_st.append({"subtopic": s, "topic": t, "module": m})
             
             total = len(all_st)
             completed_count = sum(1 for item in all_st if item["subtopic"].get("completed"))
@@ -1774,7 +1890,11 @@ async def student_dashboard(user: dict = Depends(require_roles("student"))):
                 next_topic_data = {
                     "course": course,
                     "topic": first_unfinished["topic"],
-                    "subtopic": first_unfinished["subtopic"]
+                    "subtopic": {
+                        **first_unfinished["subtopic"],
+                        "tier_locked": first_unfinished["module"].get("tier_locked", False),
+                        "unlocked": not first_unfinished["module"].get("tier_locked", False)
+                    }
                 }
 
             result_courses.append({
@@ -1787,15 +1907,17 @@ async def student_dashboard(user: dict = Depends(require_roles("student"))):
 
         # 4. Process pending submissions
         for p in pending_subs:
-            # Topic might be missing if it's not pre-joined
-            if not p.get("topic"):
-                p["topic"] = {"title": "Homework Submission"} 
+            # Reconstruct 'topic' from 'subtopics'
+            sub = p.pop("subtopics", None)
+            if sub and isinstance(sub, dict):
+                p["topic"] = {"title": sub.get("title", "Homework Submission")}
+            elif not p.get("topic") or not isinstance(p.get("topic"), dict):
+                p["topic"] = {"title": "Homework Submission"}
 
         # 5. Gamification rank
         rank = 1
         try:
-            sync_student_xp(user)
-            rank_res = supabase.table("users").select("id", count="exact").eq("role", "student").eq("is_active", True).gt("total_xp", user.get("total_xp", 0)).execute()
+            rank_res = supabase.table("users").select("id", count="exact").eq("role", "student").gt("total_xp", user.get("total_xp", 0)).execute()
             rank = (rank_res.count or 0) + 1
         except: pass
 
@@ -2561,10 +2683,6 @@ def sync_student_xp(user: dict):
 
 @api.get("/gamification/leaderboard")
 async def get_weekly_leaderboard(user: dict = Depends(get_current_user)):
-    # Trigger sync here too so ranking is always proper
-    if user["role"] == "student":
-        sync_student_xp(user)
-    
     try:
         today = now_utc().date()
         week_start = (today - timedelta(days=today.weekday())).isoformat()
@@ -3606,6 +3724,28 @@ async def get_specific_student_progress(student_id: str, batchId: str = None, us
                     t["subtopics"] = []
         else:
             m["topics"] = []
+            
+    # Filter modules based on student's payment tier access configuration
+    if student.get("role") == "student":
+        effective_tier = get_effective_tier(student)
+        if effective_tier != "full":
+            batch_res = supabase.table("batch_students").select("batch_id, batches(course_id)").eq("student_id", student["id"]).execute().data or []
+            matching_batch_id = None
+            for b in batch_res:
+                if b.get("batches", {}).get("course_id") == course["id"]:
+                    matching_batch_id = b["batch_id"]
+                    break
+            
+            resolved_batch_id = matching_batch_id or student.get("batch_id")
+            if not resolved_batch_id:
+                for m in modules:
+                    m["tier_locked"] = True
+            else:
+                allowed_res = supabase.table("batch_module_access").select("module_id").eq("batch_id", resolved_batch_id).eq("tier", effective_tier).execute().data
+                allowed_module_ids = {r["module_id"] for r in allowed_res} if allowed_res else set()
+                
+                for m in modules:
+                    m["tier_locked"] = m["id"] not in allowed_module_ids
     
     # 5. Get Student Data
     progress_res = supabase.table("student_progress").select("subtopic_id").eq("student_id", student_id).eq("is_completed", True).execute().data or []
@@ -3676,6 +3816,7 @@ async def get_specific_student_progress(student_id: str, batchId: str = None, us
             "id": m["id"],
             "title": m["title"],
             "topics": m_topics,
+            "tier_locked": m.get("tier_locked", False),
             "total_subtopics": m_total_sub,
             "completed_subtopics": m_done_sub,
             "completion_percentage": round(m_done_sub / m_total_sub * 100) if m_total_sub > 0 else 0
@@ -4456,6 +4597,11 @@ async def get_courses(user: dict = Depends(require_active_access)):
 
 @api.get("/courses/{course_id}")
 async def get_course(course_id: str, user: dict = Depends(require_active_access)):
+    # Guard against invalid UUID values like "undefined" from bad DB data
+    try:
+        uuid.UUID(course_id)
+    except (ValueError, AttributeError):
+        raise HTTPException(status_code=404, detail="Course not found")
     course_res = supabase.table("courses").select("*, users(name)").eq("id", course_id).single().execute()
     if not course_res.data:
         raise HTTPException(404, "Course not found")
@@ -4718,7 +4864,8 @@ async def record_payment(payload: PaymentRecordIn, user: dict = Depends(require_
     # Update user in DB
     user_update = {
         "access_tier": new_tier,
-        "amount_paid": new_paid
+        "amount_paid": new_paid,
+        "payment_status": new_tier
     }
     
     supabase.table("users").update(user_update).eq("id", payload.user_id).execute()
@@ -4829,6 +4976,38 @@ async def expire_demos_manually(batch_id: str, user: dict = Depends(require_role
     
     return {"status": "success", "updated_count": len(res.data or [])}
 
+
+class ReferralValidateIn(BaseModel):
+    code: str
+
+@api.post("/referral/validate")
+async def validate_referral(payload: ReferralValidateIn, user: dict = Depends(get_current_user)):
+    code = payload.code.strip()
+    
+    # Check 1: Self-referral
+    if user.get("referral_code") == code:
+        raise HTTPException(400, "You cannot use your own referral code.")
+        
+    # Check 2: Already referred
+    if user.get("referred_by"):
+        raise HTTPException(400, "You have already used a referral code.")
+        
+    # Check 3: Code exists
+    referrer = get_single_or_none(supabase.table("users").select("id, name").eq("referral_code", code))
+    if not referrer:
+        raise HTTPException(404, "Invalid referral code.")
+        
+    # Check 4: Duplicate referral (just in case, though Check 2 covers it mostly)
+    existing_ref = get_single_or_none(supabase.table("referrals").select("id").eq("referrer_id", referrer["id"]).eq("referred_id", user["id"]))
+    if existing_ref:
+        raise HTTPException(400, "Referral already recorded.")
+        
+    return {
+        "valid": True,
+        "referrer_name": referrer["name"],
+        "discount": 500
+    }
+
 # --- Razorpay Payment Gateway Integration ---
 
 RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID", "rzp_test_SrKC5KJ2yJhtWF")
@@ -4837,6 +5016,7 @@ RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET", "rzp_test_secret_pla
 class RazorpayOrderIn(BaseModel):
     amount: int
     payment_type: Literal["partial", "full", "balance"]
+    referral_code: Optional[str] = None
 
 class RazorpayVerifyIn(BaseModel):
     razorpay_payment_id: str
@@ -4849,8 +5029,37 @@ class RazorpayVerifyIn(BaseModel):
 async def create_razorpay_order(payload: RazorpayOrderIn, user: dict = Depends(get_current_user)):
     import requests
     import time
+    
+    final_amount = payload.amount
+    discount = 0
+    
+    # Auto-apply existing referral if no code provided and this is their first payment
+    ref_to_use = payload.referral_code
+    if not ref_to_use and user.get("referred_by"):
+        ref_to_use = user.get("referred_by")
+    
+    if ref_to_use:
+        code = ref_to_use.strip()
+        
+        # Fraud checks
+        if user.get("referral_code") == code:
+            raise HTTPException(400, "You cannot use your own referral code.")
+            
+        # If trying to use a DIFFERENT code than what they registered with
+        if user.get("referred_by") and user.get("referred_by") != code:
+            raise HTTPException(400, "You have already used a different referral code.")
+            
+        referrer = get_single_or_none(supabase.table("users").select("id").eq("referral_code", code))
+        if not referrer:
+            raise HTTPException(404, "Invalid referral code.")
+            
+        # Only apply discount if they haven't paid anything yet (first payment)
+        if user.get("amount_paid", 0) == 0:
+            discount = 500
+            final_amount = max(0, payload.amount - discount)
+        
     rz_payload = {
-        "amount": payload.amount * 100,  # in paise
+        "amount": final_amount * 100,  # in paise
         "currency": "INR",
         "receipt": f"rcpt_{user['id'][:8]}_{int(time.time())}"
     }
@@ -4868,10 +5077,24 @@ async def create_razorpay_order(payload: RazorpayOrderIn, user: dict = Depends(g
             raise HTTPException(400, f"Failed to create Razorpay order: {res.text}")
             
         rz_order = res.json()
+        
+        # Store in payment_orders
+        order_doc = {
+            "student_id": user["id"],
+            "razorpay_order_id": rz_order["id"],
+            "amount": final_amount,
+            "payment_type": payload.payment_type,
+            "status": "created",
+            "discount_applied": discount,
+            "referral_code_used": payload.referral_code if discount > 0 else None
+        }
+        supabase.table("payment_orders").insert(order_doc).execute()
+        
         return {
             "id": rz_order["id"],
             "amount": rz_order["amount"],
-            "currency": rz_order["currency"]
+            "currency": rz_order["currency"],
+            "discount_applied": discount
         }
     except Exception as e:
         logger.error(f"Razorpay order creation exception: {str(e)}")
@@ -4919,14 +5142,210 @@ async def verify_razorpay_payment(payload: RazorpayVerifyIn, user: dict = Depend
     supabase.table("users").update({
         "access_tier": new_tier,
         "amount_paid": new_amount_paid,
+        "payment_status": new_tier,
         "demo_expired_at": None
     }).eq("id", user["id"]).execute()
+    
+    # 4. Update referral journey status on payment (wrapped in try-except)
+    try:
+        order = get_single_or_none(supabase.table("payment_orders").select("*").eq("razorpay_order_id", payload.razorpay_order_id))
+        if order:
+            # Update order status
+            supabase.table("payment_orders").update({"status": "paid", "razorpay_payment_id": payload.razorpay_payment_id, "paid_at": iso(now_utc())}).eq("id", order["id"]).execute()
+            
+            ref_code = order.get("referral_code_used") or user.get("referred_by")
+            if ref_code:
+                referrer = get_single_or_none(supabase.table("users").select("id").eq("referral_code", ref_code))
+                if referrer:
+                    # Ensure referred_by is set on the user
+                    supabase.table("users").update({"referred_by": ref_code}).eq("id", user["id"]).execute()
+
+                    # Check if a referral record already exists (created at registration)
+                    existing_ref = get_single_or_none(
+                        supabase.table("referrals").select("*")
+                            .eq("referrer_id", referrer["id"])
+                            .eq("referred_id", user["id"])
+                    )
+
+                    if new_tier == "full":
+                        # Full payment → payout is now eligible (pending)
+                        if existing_ref:
+                            supabase.table("referrals").update({
+                                "status": "pending",
+                                "discount_applied": order.get("discount_applied", 0),
+                                "converted_at": iso(now_utc())
+                            }).eq("id", existing_ref["id"]).execute()
+                        else:
+                            supabase.table("referrals").insert({
+                                "referrer_id": referrer["id"],
+                                "referred_id": user["id"],
+                                "code": ref_code,
+                                "status": "pending",
+                                "discount_applied": order.get("discount_applied", 0),
+                                "payout_amount": 1500,
+                                "converted_at": iso(now_utc())
+                            }).execute()
+                        
+                        # Award XP and notify referrer
+                        award_xp(referrer["id"], "referral_bonus")
+                        supabase.table("notifications").insert({
+                            "user_id": referrer["id"],
+                            "title": "Referral Reward Unlocked! 🎉",
+                            "body": "Your referred friend paid in full! ₹1,500 payout is now pending admin approval.",
+                            "type": "info"
+                        }).execute()
+
+                    elif new_tier == "partial":
+                        # Partial payment → advance to awaiting_full stage
+                        if existing_ref:
+                            supabase.table("referrals").update({
+                                "status": "awaiting_full",
+                                "discount_applied": order.get("discount_applied", 0),
+                            }).eq("id", existing_ref["id"]).execute()
+                        else:
+                            supabase.table("referrals").insert({
+                                "referrer_id": referrer["id"],
+                                "referred_id": user["id"],
+                                "code": ref_code,
+                                "status": "awaiting_full",
+                                "discount_applied": order.get("discount_applied", 0),
+                                "payout_amount": 1500,
+                            }).execute()
+                        
+                        # Notify referrer about partial progress
+                        supabase.table("notifications").insert({
+                            "user_id": referrer["id"],
+                            "title": "Referral Update 📊",
+                            "body": "Your referred friend made a partial payment. Payout will unlock when they complete full payment.",
+                            "type": "info"
+                        }).execute()
+    except Exception as e:
+        logger.error(f"Error updating referral status after payment: {e}")
     
     return {
         "status": "success",
         "new_tier": new_tier,
         "total_paid": new_amount_paid
     }
+
+
+# -------------------- Referral Endpoints --------------------
+
+@api.post("/admin/backfill-referral-codes")
+async def admin_backfill_referral_codes(_: dict = Depends(require_roles("admin"))):
+    users = supabase.table("users").select("id").is_("referral_code", "null").execute().data or []
+    count = 0
+    for u in users:
+        code = generate_referral_code()
+        supabase.table("users").update({"referral_code": code}).eq("id", u["id"]).execute()
+        count += 1
+    return {"status": "success", "updated": count}
+
+@api.get("/admin/referrals")
+async def get_admin_referrals(status: Optional[str] = None, _: dict = Depends(require_roles("admin"))):
+    q = supabase.table("referrals").select("*, referrer:users!referrals_referrer_id_fkey(name, upi_id), referred:users!referrals_referred_id_fkey(name, access_tier, amount_paid)")
+    if status:
+        q = q.eq("status", status)
+    data = q.order("created_at", desc=True).execute().data or []
+    return data
+
+class MarkPaidIn(BaseModel):
+    utr_number: str
+
+@api.post("/admin/referrals/{referral_id}/mark-paid")
+async def mark_referral_paid(referral_id: str, payload: MarkPaidIn, _: dict = Depends(require_roles("admin"))):
+    ref = get_single_or_none(supabase.table("referrals").select("*").eq("id", referral_id))
+    if not ref:
+        raise HTTPException(404, "Referral not found")
+        
+    supabase.table("referrals").update({
+        "status": "paid",
+        "utr_number": payload.utr_number,
+        "paid_at": iso(now_utc())
+    }).eq("id", referral_id).execute()
+    
+    supabase.table("notifications").insert({
+        "user_id": ref["referrer_id"],
+        "title": "₹1500 Referral Payout Sent!",
+        "body": f"Your referral payout of ₹1500 has been sent. UTR: {payload.utr_number}",
+        "type": "success"
+    }).execute()
+    return {"status": "success"}
+
+@api.post("/admin/referrals/{referral_id}/reject")
+async def reject_referral(referral_id: str, _: dict = Depends(require_roles("admin"))):
+    ref = get_single_or_none(supabase.table("referrals").select("*").eq("id", referral_id))
+    if not ref:
+        raise HTTPException(404, "Referral not found")
+        
+    supabase.table("referrals").update({"status": "rejected"}).eq("id", referral_id).execute()
+    
+    supabase.table("notifications").insert({
+        "user_id": ref["referrer_id"],
+        "title": "Referral Payout Rejected",
+        "body": "Unfortunately, one of your pending referral payouts has been rejected by an admin.",
+        "type": "error"
+    }).execute()
+    return {"status": "success"}
+
+@api.get("/admin/referral-leaderboard")
+async def get_referral_leaderboard(_: dict = Depends(require_roles("admin"))):
+    # Could do this in SQL, but for now we aggregate in python or simple query
+    referrals = supabase.table("referrals").select("referrer_id, status, payout_amount").execute().data or []
+    users = supabase.table("users").select("id, name, total_xp").execute().data or []
+    
+    user_map = {u["id"]: {"id": u["id"], "name": u["name"], "total_referrals": 0, "total_paid": 0, "total_pending": 0, "total_xp_earned": u["total_xp"]} for u in users}
+    
+    for r in referrals:
+        rid = r["referrer_id"]
+        if rid in user_map:
+            user_map[rid]["total_referrals"] += 1
+            if r["status"] == "paid":
+                user_map[rid]["total_paid"] += r.get("payout_amount", 0)
+            elif r["status"] == "pending":
+                user_map[rid]["total_pending"] += r.get("payout_amount", 0)
+                
+    leaderboard = [u for u in user_map.values() if u["total_referrals"] > 0]
+    leaderboard.sort(key=lambda x: x["total_referrals"], reverse=True)
+    return leaderboard
+
+@api.get("/student/referral")
+async def get_student_referral(user: dict = Depends(get_current_user)):
+    code = user.get("referral_code")
+    if not code:
+        # Auto-generate if missing
+        code = generate_referral_code()
+        supabase.table("users").update({"referral_code": code}).eq("id", user["id"]).execute()
+        
+    refs = supabase.table("referrals").select("*, referred:users!referrals_referred_id_fkey(name)").eq("referrer_id", user["id"]).order("created_at", desc=True).execute().data or []
+    
+    total_earned = sum(r.get("payout_amount", 0) for r in refs if r["status"] == "paid")
+    pending = sum(r.get("payout_amount", 0) for r in refs if r["status"] == "pending")
+    
+    formatted_refs = [{
+        "referred_name": r.get("referred", {}).get("name", "Unknown"),
+        "status": r["status"],
+        "converted_at": r.get("converted_at"),
+        "created_at": r.get("created_at")
+    } for r in refs]
+    
+    return {
+        "my_code": code,
+        "upi_id": user.get("upi_id") or "",
+        "total_referrals": len(refs),
+        "pending_payout": pending,
+        "total_earned": total_earned,
+        "referrals": formatted_refs
+    }
+
+class UpiIdIn(BaseModel):
+    upi_id: str
+
+@api.put("/student/upi-id")
+async def save_upi_id(payload: UpiIdIn, user: dict = Depends(get_current_user)):
+    upi = payload.upi_id.strip()
+    supabase.table("users").update({"upi_id": upi}).eq("id", user["id"]).execute()
+    return {"status": "success", "upi_id": upi}
 
 app.include_router(api)
 

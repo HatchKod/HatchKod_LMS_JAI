@@ -24,9 +24,10 @@ The project implements a **Custom JWT + Bcrypt** flow, layered on top of Supabas
 
 ### Database Schema (Supabase/PostgreSQL)
 Key tables and their primary roles:
-- `users`: Core user data including `total_xp`, `level`, `current_streak`, and `assigned_mentor_id`.
+- `users`: Core user data including `total_xp`, `level`, `current_streak`, `access_tier`, `payment_status`, and `amount_paid`.
 - `batches`: Grouping of students for specific courses and mentors.
 - `batch_students`: Mapping table for student-to-batch enrollment.
+- `batch_module_access`, `batch_demo_modules`, `batch_partial_modules`: Control module accessibility based on tiers.
 - `courses`, `modules`, `topics`, `subtopics`, `tasks`: The 3-level content hierarchy.
 - `submissions`: Records student task submissions (GitHub URLs or file paths) and mentor feedback/status.
 - `student_progress`: Tracks completion of subtopics (`is_completed = True`) to handle the locking/unlocking logic at the topic level.
@@ -38,9 +39,10 @@ Key tables and their primary roles:
 - `attendance`: Tracks student attendance statuses (`present`, `absent`, `late`) for class sessions.
 - `problems`, `test_cases`, `problem_submissions`: Support for the coding challenge library.
 - `notifications`: Stores broadcast and automated alerts.
+- `payments`, `payment_orders`: Tracks financial transactions, Razorpay checkouts, and student tier upgrades.
 
 ### Business Logic & Code Execution
-- **Sequential Unlocking**: `is_topic_unlocked` helper verifies that Topic N-1 is complete before allowing access to Topic N. A Topic N-1 is complete when all its mandatory subtopics are finished (`is_completed = True` in `student_progress`). Subtopics with tasks are completed when their submissions are approved by a mentor; subtopics without tasks can be completed manually by students.
+- **Tier-Based Access & Sequential Unlocking**: The system strictly enforces content access based on a user's `access_tier` (demo, partial, full) preventing unauthorized API fetches. Within accessible modules, `is_topic_unlocked` verifies that Topic N-1 is complete before allowing access to Topic N. A Topic N-1 is complete when all its mandatory subtopics are finished.
 - **Gamification Engine**:
     - `award_xp`: Calculates and updates XP based on actions (`lesson_completed`: 20 XP, `quiz_passed`: 40 XP, `problem_solved`: 50 XP, `project_approved`: 150 XP).
     - `sync_student_xp`: A retroactive sync utility that ensures a student's XP matches their approved work history.
@@ -65,6 +67,11 @@ Key tables and their primary roles:
 - **Review Scoping**: Mentors only see "Pending" submissions for students **assigned to them** or students who are currently **unassigned**.
 - **Approval**: If "Approved", the student's subtopic progress is marked complete, they receive 150 XP, and the next topic is unlocked (if all other mandatory subtopics in the current topic are complete). If "Rework", the student must resubmit based on feedback.
 
+### Billing & Tiered Access Flow
+- **Access Tiers**: Students are assigned a `demo`, `partial`, or `full` tier which dictates which modules they can fetch and view.
+- **PaymentWall**: When a student attempts to access a restricted module or subtopic (throwing a custom `403 TIER_LOCKED` error), the frontend intercepts this and renders a PaymentWall component.
+- **Checkout Integration**: Integrated with Razorpay for online checkouts, updating the user's `access_tier` and `payment_status` automatically upon successful signature verification. Admins can also manually record payments and upgrade tiers via the Admin Dashboard.
+
 ---
 
 ## 4. Frontend Implementation
@@ -85,12 +92,13 @@ The application follows a **Swiss & High-Contrast** aesthetic:
 ## 5. Maintenance & Design Debt
 
 ### Technical Pain Points
-- **Monolithic Backend**: The backend is currently housed in a single **3,300+ line `server.py`**. This makes maintenance difficult and is a primary candidate for refactoring into modular routers (e.g., `auth_router`, `course_router`).
+### Technical Pain Points
+- **Monolithic Backend**: The backend is currently housed in a single **~5,000 line `server.py`**. This makes maintenance difficult and is a primary candidate for refactoring into modular routers (e.g., `auth_router`, `course_router`, `payment_router`).
 - **Mixed Database Logic**: Database queries (Supabase client calls) are mixed directly with business logic and route handlers.
 
 ### Deployment & Environment
-- **Target**: Self-hosted Linux VPS (Ubuntu).
-- **Process Management**: **PM2** handles the backend FastAPI process and frontend serving.
-- **Reverse Proxy**: **Nginx** handles SSL and traffic routing.
-- **Environment**: Requires `.env` with `SUPABASE_URL`, `SUPABASE_KEY`, `JWT_SECRET`, and `ADMIN_EMAIL`.
+- **Target**: Frontend is deployed via **Vercel** for global CDN delivery, while the backend API runs on a Self-hosted Linux VPS (Ubuntu).
+- **Process Management**: **PM2** handles the backend FastAPI process.
+- **Reverse Proxy**: **Nginx** handles SSL and traffic routing for the backend.
+- **Environment**: Requires `.env` with `SUPABASE_URL`, `SUPABASE_KEY`, `JWT_SECRET`, `ADMIN_EMAIL`, `RAZORPAY_KEY_ID`, and `RAZORPAY_KEY_SECRET`.
 - **Onboarding**: Integrated with **AWS Lambda** for automated student onboarding flows.
