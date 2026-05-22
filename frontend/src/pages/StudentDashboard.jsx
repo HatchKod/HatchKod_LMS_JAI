@@ -34,10 +34,9 @@ export default function StudentDashboard() {
     fetchDashboardData();
     
     if (user?.id) {
-      const channel = supabase.channel('student_batch_realtime')
+      const channel = supabase.channel(`student_batch_realtime_${user.id}`)
         .on('postgres_changes', {
-          event: 'INSERT', schema: 'public', table: 'batch_students',
-          filter: `student_id=eq.${user.id}`
+          event: '*', schema: 'public', table: 'batch_students'
         }, () => {
           fetchDashboardData();
         })
