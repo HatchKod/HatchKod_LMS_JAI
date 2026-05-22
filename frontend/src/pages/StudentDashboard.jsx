@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { Link } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import { api } from "../lib/api";
@@ -12,56 +12,63 @@ import StatusPill from "../components/StatusPill";
 import { Users, Award, Target, Flame, Trophy, Video, BookOpen, ListChecks, Clock, ArrowRight, TrendingUp } from "lucide-react";
 import PaymentWall from "../components/PaymentWall";
 import { supabase } from "../lib/supabase";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 export default function StudentDashboard() {
   const { user } = useAuth();
-  const [data, setData] = useState(null);
+  const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState("inprogress");
-  const [paymentStatus, setPaymentStatus] = useState(null);
 
-  const fetchDashboardData = async () => {
-    try {
+  // Dashboard Data Query
+  const { 
+    data, 
+    isLoading: isDashboardLoading, 
+    error: dashboardError,
+    refetch: refetchDashboard
+  } = useQuery({
+    queryKey: ["dashboard", "student", user?.id],
+    queryFn: async () => {
       const { data } = await api.get("/dashboard/student");
-      setData(data);
-    } catch (err) {
-      if (err.response?.status === 403 && err.response?.data?.detail?.code === "ACCESS_EXPIRED") {
-        setPaymentStatus({ effective_tier: "expired" });
+      return data;
+    },
+    enabled: !!user?.id,
+    staleTime: 1000 * 60 * 2, // 2 minutes
+  });
+
+  // Payment Status Query
+  const { 
+    data: paymentStatus,
+    isLoading: isPaymentLoading 
+  } = useQuery({
+    queryKey: ["payment", "status", user?.id],
+    queryFn: async () => {
+      try {
+        const { data } = await api.get("/payment/status");
+        return data;
+      } catch (err) {
+        if (err.response?.status === 403 && err.response?.data?.detail?.code === "ACCESS_EXPIRED") {
+          return { effective_tier: "expired" };
+        }
+        throw err;
       }
-    }
-  };
+    },
+    enabled: !!user?.id,
+    staleTime: 1000 * 60 * 10, // 10 minutes
+  });
 
   useEffect(() => {
-    fetchDashboardData();
-    
     if (user?.id) {
       const channel = supabase.channel(`student_batch_realtime_${user.id}`)
         .on('postgres_changes', {
           event: '*', schema: 'public', table: 'batch_students'
         }, () => {
-          fetchDashboardData();
+          queryClient.invalidateQueries({ queryKey: ["dashboard", "student", user.id] });
         })
         .subscribe();
         
       return () => supabase.removeChannel(channel);
     }
-  }, [user?.access_tier, user?.id]);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const { data } = await api.get("/payment/status");
-        setPaymentStatus(data);
-      } catch (err) {
-        if (err.response?.status === 403 && err.response?.data?.detail?.code === "ACCESS_EXPIRED") {
-          setPaymentStatus({ effective_tier: "expired" });
-        }
-      }
-    })();
-  }, [user?.access_tier]);
-
-  if (paymentStatus?.effective_tier === "expired" || user?.access_tier === "expired") {
-    return <PaymentWall />;
-  }
+  }, [user?.id, queryClient]);
 
   useEffect(() => {
     if (data && window.location.hash === "#courses-section") {
@@ -74,14 +81,46 @@ export default function StudentDashboard() {
     }
   }, [data]);
 
-  if (!data) {
+  const isExpired = paymentStatus?.effective_tier === "expired" || user?.access_tier === "expired";
+  if (isExpired) {
+    return <PaymentWall />;
+  }
+
+  if (isDashboardLoading && !data) {
     return (
       <div className="min-h-screen bg-white">
         <Navbar />
-        <div className="mx-auto max-w-7xl p-6 text-sm text-slate-500" data-testid="dashboard-loading">Loading dashboard…</div>
+        <div className="mx-auto max-w-7xl p-8 flex flex-col items-center justify-center min-h-[60vh]">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-[#194BFB] mb-4" />
+          <div className="text-sm text-slate-500 font-medium" data-testid="dashboard-loading">Initializing dashboard…</div>
+        </div>
       </div>
     );
   }
+
+  if (dashboardError && !data) {
+    return (
+      <div className="min-h-screen bg-white">
+        <Navbar />
+        <div className="mx-auto max-w-7xl p-8 flex flex-col items-center justify-center min-h-[60vh]">
+          <div className="bg-red-50 text-red-600 p-6 rounded-sm border border-red-100 max-w-md text-center">
+            <h3 className="font-bold text-lg mb-2">Something went wrong</h3>
+            <p className="text-sm mb-6 opacity-90">
+              {dashboardError.response?.data?.message || "Unable to load your dashboard. Please check your connection and try again."}
+            </p>
+            <Button 
+              onClick={() => refetchDashboard()}
+              className="bg-red-600 hover:bg-red-700 text-white rounded-sm px-8"
+            >
+              Retry Loading
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!data) return null;
 
   const inprogressCourses = data.courses.filter(c => c.progress < 100);
   const completedCourses = data.courses.filter(c => c.progress === 100);

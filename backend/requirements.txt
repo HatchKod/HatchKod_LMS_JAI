@@ -11,4 +11,7 @@ pydantic
 email-validator
 python-multipart
 boto3
+redis
+fastapi-cache2
+pendulum
 

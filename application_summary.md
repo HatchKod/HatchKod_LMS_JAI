@@ -6,14 +6,28 @@ HatchKod LMS is a production-grade Learning Management System built for a "learn
 ### Core Technology Stack
 | Layer | Technologies |
 | :--- | :--- |
-| **Frontend** | React 19, Tailwind CSS, Radix UI, Lucide, Axios, Sonner (Toasts) |
-| **Backend** | FastAPI (Python 3.9+), PyJWT, Bcrypt, HTTPX |
+| **Frontend** | React 19, Tailwind CSS, Radix UI, Lucide, Axios, Sonner, **TanStack Query (React Query)** |
+| **Backend** | FastAPI (Python 3.9+), PyJWT, Bcrypt, HTTPX, **Redis**, **FastAPI-Cache2** |
 | **Database/BaaS** | Supabase (PostgreSQL, Storage, Real-time) |
 | **Infrastructure** | Judge0 (Code Execution), AWS Lambda (Email Triggers), PM2, Nginx |
 
 ---
 
 ## 2. Technical Architecture Details
+
+### Performance & Caching Architecture
+To ensure high stability and sub-second response times, the system employs a multi-layered caching strategy:
+- **Frontend Caching (TanStack Query)**:
+    - Implemented global state management for server data with `staleTime` and `cacheTime` optimizations.
+    - Automatic request deduplication prevents redundant API calls from multiple components (e.g., Navbar and Dashboard).
+    - Background refetching and window-focus synchronization keep the UI fresh without manual reloads.
+- **Backend Caching (Redis + FastAPI-Cache)**:
+    - **Global Cache**: Common metadata like course lists and syllabus structure are cached with a 1-hour TTL.
+    - **User-Scoped Caching**: Dynamic data like the Student Dashboard is cached using a custom `user_key_builder` that hashes the User ID into the cache key, ensuring security and data isolation.
+    - **Automatic Fallback**: The system detects Redis availability at startup; if Redis is unreachable, it gracefully falls back to an `InMemoryBackend` to maintain performance.
+- **Database Connection Stability**:
+    - **Forced HTTP/1.1**: Disables HTTP/2 to prevent "Server disconnected" errors common in Postgrest/Supabase stream handling.
+    - **Safe Execution Wrapper**: All critical database queries are wrapped in `safe_supabase_execute`, which provides **exponential backoff and automatic retries** for transient network failures.
 
 ### Authentication & Authorization (Custom Layered Flow)
 The project implements a **Custom JWT + Bcrypt** flow, layered on top of Supabase PostgreSQL.

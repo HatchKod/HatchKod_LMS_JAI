@@ -17,6 +17,7 @@ export default function CourseView() {
   const [openModules, setOpenModules] = useState({});
   const [openTopics, setOpenTopics] = useState({});
   const [paymentStatus, setPaymentStatus] = useState(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (user?.role !== "student") return;
@@ -33,18 +34,27 @@ export default function CourseView() {
   }, [user?.access_tier, user?.role]);
 
   const load = async () => {
-    const { data } = await api.get(`/courses/${id}`);
-    setCourse(data);
-    // Open all modules and topics by default
-    if (data?.modules) {
-      const mOpen = {};
-      const tOpen = {};
-      data.modules.forEach(m => {
-        mOpen[m.id] = true;
-        (m.topics || []).forEach(t => { tOpen[t.id] = true; });
-      });
-      setOpenModules(mOpen);
-      setOpenTopics(tOpen);
+    try {
+      setLoading(true);
+      const { data } = await api.get(`/courses/${id}`);
+      setCourse(data);
+      
+      // Open all modules and topics by default on first load
+      if (data?.modules) {
+        const mOpen = {};
+        const tOpen = {};
+        data.modules.forEach(m => {
+          mOpen[m.id] = true;
+          (m.topics || []).forEach(t => { tOpen[t.id] = true; });
+        });
+        setOpenModules(mOpen);
+        setOpenTopics(tOpen);
+      }
+    } catch (err) {
+      console.error("Failed to load course:", err);
+      toast.error("Failed to load course content. Please try again later.");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -63,11 +73,22 @@ export default function CourseView() {
     return <PaymentWall />;
   }
 
-  if (!course) {
+  if (loading && !course) {
     return (
       <div className="min-h-screen bg-white">
         <Navbar />
         <div className="max-w-4xl mx-auto py-16 px-6 text-sm text-slate-400">Loading…</div>
+      </div>
+    );
+  }
+
+  if (!course) {
+    return (
+      <div className="min-h-screen bg-white">
+        <Navbar />
+        <div className="max-w-4xl mx-auto py-16 px-6 text-sm text-slate-400 text-center">
+          Course not found or failed to load.
+        </div>
       </div>
     );
   }

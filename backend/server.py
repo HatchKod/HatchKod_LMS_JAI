@@ -7,66 +7,138 @@ load_dotenv(ROOT_DIR / ".env")
 import os
 import re
 import logging
-from collections import defaultdict
+import time
+import asyncio
 import uuid
+import traceback
+from collections import defaultdict
 from datetime import datetime, timezone, timedelta
-from typing import List, Optional, Literal
+from typing import List, Optional, Literal, Any
 
 import bcrypt
 import jwt
 import requests
 import httpx
-from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request, Response, BackgroundTasks, File, UploadFile, Form
-from starlette.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, EmailStr
-from supabase import create_client
 import boto3
 from botocore.exceptions import ClientError
+from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request, Response, BackgroundTasks, File, UploadFile, Form
+from fastapi.responses import JSONResponse
+from starlette.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field, EmailStr
+from supabase import create_client, ClientOptions
 
-load_dotenv()
+from fastapi_cache import FastAPICache
+from fastapi_cache.backends.inmemory import InMemoryBackend
+from fastapi_cache.backends.redis import RedisBackend
+from fastapi_cache.decorator import cache
+import redis.asyncio as redis_async
 
-def iso(dt: datetime):
+# -------------------- Global Setup --------------------
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+logger = logging.getLogger("hatchkod")
+
+def iso(dt: datetime) -> str:
     return dt.isoformat()
 
-def now_utc():
+def now_utc() -> datetime:
     return datetime.now(timezone.utc)
-
-def get_single_or_none(query):
-    try:
-        res = query.execute()
-        return res.data[0] if res.data else None
-    except:
-        return None
-
-
-
-# -------------------- Config --------------------
-
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-
-JWT_SECRET = os.getenv("JWT_SECRET")
-JWT_ALGORITHM = os.getenv("JWT_ALGORITHM")
-ACCESS_TOKEN_MIN = int(os.getenv("ACCESS_TOKEN_MIN", 60))
-
-ADMIN_EMAIL = os.getenv("ADMIN_EMAIL")
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
-
-# Production Endpoints
-ONBOARDING_LAMBDA_URL = os.getenv("ONBOARDING_LAMBDA_URL", "https://9vsd5hlgu3.execute-api.ap-south-1.amazonaws.com/Dev/onboard_student")
-PRODUCTION_DOMAIN = os.getenv("PRODUCTION_DOMAIN", "https://hatchkod.in")
-
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 app = FastAPI(title="HatchKod LMS")
 
+# -------------------- Cache Setup --------------------
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
+
+@app.on_event("startup")
+async def startup_cache():
+    logger.info("Starting up cache system...")
+    try:
+        pool = redis_async.ConnectionPool.from_url(REDIS_URL)
+        r = redis_async.Redis(connection_pool=pool)
+        await r.ping()
+        logger.info(f"Connecting to Redis at {REDIS_URL} for caching...")
+        FastAPICache.init(RedisBackend(r), prefix="hk-cache")
+        logger.info("Cache system initialized with Redis.")
+    except Exception as e:
+        logger.warning(f"Redis not available ({e}), falling back to in-memory cache.")
+        FastAPICache.init(InMemoryBackend(), prefix="hk-cache")
+        logger.info("Cache system initialized with InMemoryBackend.")
+
+def user_key_builder(
+    func,
+    namespace: Optional[str] = "",
+    request: Request = None,
+    response: Response = None,
+    *args,
+    **kwargs,
+):
+    prefix = f"{FastAPICache.get_prefix()}:{namespace}:{func.__module__}:{func.__name__}"
+    user = kwargs.get("user")
+    if user and isinstance(user, dict) and "id" in user:
+        key = f"{prefix}:user:{user['id']}:{args}:{kwargs}"
+        # logger.debug(f"Generated cache key for user {user['id']}: {key}")
+        return key
+    
+    key = f"{prefix}:{args}:{kwargs}"
+    # logger.debug(f"Generated generic cache key: {key}")
+    return key
+
+# -------------------- Config --------------------
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+JWT_SECRET = os.getenv("JWT_SECRET")
+JWT_ALGORITHM = os.getenv("JWT_ALGORITHM")
+ACCESS_TOKEN_MIN = int(os.getenv("ACCESS_TOKEN_MIN", 60))
+ADMIN_EMAIL = os.getenv("ADMIN_EMAIL")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
+
+ONBOARDING_LAMBDA_URL = os.getenv("ONBOARDING_LAMBDA_URL", "https://9vsd5hlgu3.execute-api.ap-south-1.amazonaws.com/Dev/onboard_student")
+PRODUCTION_DOMAIN = os.getenv("PRODUCTION_DOMAIN", "https://hatchkod.in")
+
+supabase = create_client(
+    SUPABASE_URL,
+    SUPABASE_KEY,
+    options=ClientOptions(
+        postgrest_client_timeout=30.0,
+        storage_client_timeout=30.0,
+        schema="public",
+        httpx_client=httpx.Client(
+            http2=False,
+            limits=httpx.Limits(max_keepalive_connections=20, max_connections=50),
+            timeout=30.0
+        )
+    )
+)
+
+from starlette.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+import traceback
+
+# CORS configuration - Added at the top to ensure it wraps all routes
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173", PRODUCTION_DOMAIN],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5173"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Global exception caught: {exc}")
+    traceback.print_exc()
+    # Return standardized JSON even on crash, with CORS headers
+    return JSONResponse(
+        status_code=500,
+        content={
+            "success": False,
+            "message": "Internal server error",
+            "detail": str(exc)
+        }
+    )
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
@@ -81,14 +153,44 @@ api = APIRouter(prefix="/api")
 async def health():
     return {"status": "healthy", "timestamp": iso(now_utc())}
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-logger = logging.getLogger("hatchkod")
-
-
 # -------------------- Helpers --------------------
+def safe_supabase_execute(query, max_retries=3):
+    """
+    Wrapper for Supabase/Postgrest queries with retry logic for transient connection issues.
+    """
+    import time
+    last_err = None
+    for attempt in range(max_retries):
+        try:
+            return query.execute()
+        except (httpx.RemoteProtocolError, httpx.ReadError, httpx.ConnectError, httpx.PoolTimeout) as e:
+            last_err = e
+            logger.warning(f"Supabase connection error (attempt {attempt+1}/{max_retries}): {str(e)}")
+            if attempt < max_retries - 1:
+                time.sleep(0.5 * (2 ** attempt)) # Exponential backoff
+                continue
+            raise e
+        except Exception as e:
+            # Catch "Server disconnected" or "Connection reset" which might be wrapped in general Exception
+            err_str = str(e).lower()
+            if "disconnected" in err_str or "reset" in err_str or "connection" in err_str:
+                last_err = e
+                logger.warning(f"Supabase transient failure (attempt {attempt+1}/{max_retries}): {str(e)}")
+                if attempt < max_retries - 1:
+                    time.sleep(0.5 * (2 ** attempt))
+                    continue
+            raise e
+    return None
+
 def get_single_or_none(query):
-    res = query.execute().data
-    return res[0] if res else None
+    try:
+        res = safe_supabase_execute(query)
+        return res.data[0] if res and res.data else None
+    except Exception as e:
+        logger.error(f"Database query error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return None
 
 def now_utc() -> datetime:
     return datetime.now(timezone.utc)
@@ -1793,10 +1895,16 @@ async def admin_create_user(payload: AdminUserIn, _: dict = Depends(require_role
 
 # -------------------- Dashboards --------------------
 @api.get("/dashboard/student")
+@cache(expire=120, key_builder=user_key_builder)
 async def student_dashboard(user: dict = Depends(require_roles("student"))):
     try:
         # 1. Get batch/course context
-        enroll_res = supabase.table("batch_students").select("batch_id, batches(course_id, mentor_id)").eq("student_id", user["id"]).execute()
+        enroll_res = safe_supabase_execute(
+            supabase.table("batch_students").select("batch_id, batches(course_id, mentor_id)").eq("student_id", user["id"])
+        )
+        if not enroll_res:
+            raise HTTPException(status_code=503, detail="Database temporarily unavailable")
+            
         course_ids = list({e["batches"]["course_id"] for e in enroll_res.data if e.get("batches") and e["batches"].get("course_id")})
         mentor_ids = list({e["batches"]["mentor_id"] for e in enroll_res.data if e.get("batches") and e["batches"].get("mentor_id")})
         batch_ids = [e["batch_id"] for e in enroll_res.data if e.get("batch_id")]
@@ -1818,20 +1926,28 @@ async def student_dashboard(user: dict = Depends(require_roles("student"))):
 
         # 2. Parallel fetch essential data AND full structure in one nested query
         import asyncio
+        import time
+        start_time = time.time()
         async def fetch_data():
-            courses_t = asyncio.to_thread(lambda: supabase.table("courses").select("*").eq("is_published", True).in_("id", course_ids).execute().data or [])
-            progress_t = asyncio.to_thread(lambda: supabase.table("student_progress").select("subtopic_id").eq("student_id", user["id"]).eq("is_completed", True).execute().data or [])
-            mentor_t = asyncio.to_thread(lambda: supabase.table("users").select("id, name, email").in_("id", mentor_ids).execute().data or [] if mentor_ids else [])
-            pending_t = asyncio.to_thread(lambda: supabase.table("submissions").select("*, subtopics(id, title)").eq("student_id", user["id"]).in_("status", ["pending", "rework"]).execute().data or [])
-            # Single nested query replaces N sequential get_course() calls
-            structure_t = asyncio.to_thread(lambda: supabase.table("modules")
+            def q_courses(): return safe_supabase_execute(supabase.table("courses").select("id, title, description, status, created_at").eq("is_published", True).in_("id", course_ids)).data or []
+            def q_progress(): return safe_supabase_execute(supabase.table("student_progress").select("subtopic_id").eq("student_id", user["id"]).eq("is_completed", True)).data or []
+            def q_mentors(): return safe_supabase_execute(supabase.table("users").select("id, name, email").in_("id", mentor_ids)).data or [] if mentor_ids else []
+            def q_pending(): return safe_supabase_execute(supabase.table("submissions").select("*, subtopics(id, title)").eq("student_id", user["id"]).in_("status", ["pending", "rework"])).data or []
+            def q_structure(): return safe_supabase_execute(supabase.table("modules")
                 .select("id, title, sequence_order, course_id, topics(id, title, sequence_order, subtopics(id, title, sequence_order, is_published))")
                 .in_("course_id", course_ids)
-                .order("sequence_order")
-                .execute().data or [])
-            return await asyncio.gather(courses_t, progress_t, mentor_t, pending_t, structure_t)
+                .order("sequence_order")).data or []
+            
+            return await asyncio.gather(
+                asyncio.to_thread(q_courses),
+                asyncio.to_thread(q_progress),
+                asyncio.to_thread(q_mentors),
+                asyncio.to_thread(q_pending),
+                asyncio.to_thread(q_structure)
+            )
 
         courses, progress_records, mentor_data, pending_subs, all_modules_raw = await fetch_data()
+        logger.info(f"Dashboard data fetch for {user['id']} took {time.time() - start_time:.2f}s")
         progress_set = {p["subtopic_id"] for p in progress_records if p.get("subtopic_id")}
         mentor = mentor_data[0] if mentor_data else None
 
@@ -1839,8 +1955,10 @@ async def student_dashboard(user: dict = Depends(require_roles("student"))):
         effective_tier = get_effective_tier(user)
         allowed_module_ids = set()
         if effective_tier not in ("full", "expired") and batch_ids:
-            bma_res = supabase.table("batch_module_access").select("module_id").in_("batch_id", batch_ids).eq("tier", effective_tier).execute().data or []
-            allowed_module_ids = {r["module_id"] for r in bma_res}
+            bma_res = safe_supabase_execute(
+                supabase.table("batch_module_access").select("module_id").in_("batch_id", batch_ids).eq("tier", effective_tier)
+            )
+            allowed_module_ids = {r["module_id"] for r in bma_res.data} if bma_res and bma_res.data else set()
 
         # Build in-memory lookup maps from nested structure
         modules_by_course = {}
@@ -1915,10 +2033,12 @@ async def student_dashboard(user: dict = Depends(require_roles("student"))):
                 p["topic"] = {"title": "Homework Submission"}
 
         # 5. Gamification rank
-        rank = 1
+        rank = "N/A"
         try:
-            rank_res = supabase.table("users").select("id", count="exact").eq("role", "student").gt("total_xp", user.get("total_xp", 0)).execute()
-            rank = (rank_res.count or 0) + 1
+            rank_res = safe_supabase_execute(
+                supabase.table("users").select("id", count="exact").eq("role", "student").gt("total_xp", user.get("total_xp", 0))
+            )
+            rank = (rank_res.count or 0) + 1 if rank_res else "N/A"
         except: pass
 
         return {
@@ -1935,8 +2055,10 @@ async def student_dashboard(user: dict = Depends(require_roles("student"))):
             }
         }
     except Exception as e:
-        logger.error(f"Error in student_dashboard: {str(e)}")
-        return {"courses": [], "mentor": None, "next_topic": None, "pending_submissions": [], "gamification": {}}
+        logger.error(f"Error loading student dashboard for {user['id']}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(500, "Internal server error loading dashboard")
 
 
 @api.get("/auth/profile")
@@ -4167,12 +4289,17 @@ async def get_notifications(user: dict = Depends(get_current_user)):
 
 @api.get("/notifications/unread-count")
 async def get_unread_count(user: dict = Depends(get_current_user)):
-    res = supabase.table("notifications")\
-        .select("id", count="exact")\
-        .eq("user_id", user["id"])\
-        .eq("is_read", False)\
-        .execute()
-    return {"count": res.count}
+    try:
+        query = supabase.table("notifications")\
+            .select("id", count="exact")\
+            .eq("user_id", user["id"])\
+            .eq("is_read", False)
+        
+        res = safe_supabase_execute(query)
+        return {"count": res.count if res else 0}
+    except Exception as e:
+        logger.error(f"Error getting unread count for {user['id']}: {e}")
+        return {"count": 0}
 
 
 @api.post("/notifications/mark-read")
@@ -4350,15 +4477,6 @@ async def get_batch_students(batch_id: str, user: dict = Depends(require_roles("
         
     return flattened
 
-
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,  # using token in header from FE; cookies also set but FE sends Authorization
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 
 # -------------------- Seed --------------------
@@ -4567,6 +4685,7 @@ async def on_shutdown():
 
 # -------------------- Courses (Student/Public) --------------------
 @api.get("/courses")
+@cache(expire=3600)
 async def get_courses(user: dict = Depends(require_active_access)):
     if user["role"] == "student":
         # --- BATCH FILTER: Only show the course(s) from the student's assigned batch(es) ---
@@ -4596,7 +4715,9 @@ async def get_courses(user: dict = Depends(require_active_access)):
     return courses
 
 @api.get("/courses/{course_id}")
+@cache(expire=3600)
 async def get_course(course_id: str, user: dict = Depends(require_active_access)):
+    # ... (rest of get_course logic)
     # Guard against invalid UUID values like "undefined" from bad DB data
     try:
         uuid.UUID(course_id)
@@ -4642,10 +4763,10 @@ async def get_course(course_id: str, user: dict = Depends(require_active_access)
     # 2. Fetch topics and student data in parallel safely
     import asyncio
     async def fetch_parallel():
-        t_task = asyncio.to_thread(lambda: supabase.table("topics").select("*").in_("module_id", module_ids).execute().data or [])
+        t_task = asyncio.to_thread(lambda: create_client(SUPABASE_URL, SUPABASE_KEY).table("topics").select("*").in_("module_id", module_ids).execute().data or [])
         if user["role"] == "student":
-            p_task = asyncio.to_thread(lambda: supabase.table("student_progress").select("*").eq("student_id", user["id"]).execute().data or [])
-            sub_task = asyncio.to_thread(lambda: supabase.table("submissions").select("*").eq("student_id", user["id"]).execute().data or [])
+            p_task = asyncio.to_thread(lambda: create_client(SUPABASE_URL, SUPABASE_KEY).table("student_progress").select("*").eq("student_id", user["id"]).execute().data or [])
+            sub_task = asyncio.to_thread(lambda: create_client(SUPABASE_URL, SUPABASE_KEY).table("submissions").select("*").eq("student_id", user["id"]).execute().data or [])
             return await asyncio.gather(t_task, p_task, sub_task)
         else:
             return await asyncio.gather(t_task)
