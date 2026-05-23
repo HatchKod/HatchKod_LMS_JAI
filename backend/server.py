@@ -74,13 +74,14 @@ def user_key_builder(
     prefix = f"{FastAPICache.get_prefix()}:{namespace}:{func.__module__}:{func.__name__}"
     user = kwargs.get("user")
     if user and isinstance(user, dict) and "id" in user:
-        key = f"{prefix}:user:{user['id']}:{args}:{kwargs}"
-        # logger.debug(f"Generated cache key for user {user['id']}: {key}")
-        return key
-    
-    key = f"{prefix}:{args}:{kwargs}"
-    # logger.debug(f"Generated generic cache key: {key}")
-    return key
+        # Key scoped only by user ID — never include full kwargs dict to avoid
+        # serialization inconsistencies that collapse all users to the same key
+        return f"{prefix}:user:{user['id']}"
+    # No user resolved — fall back to request-level uniqueness to avoid cross-user hits
+    if request:
+        auth = request.headers.get("authorization", "")
+        return f"{prefix}:req:{hash(auth)}"
+    return f"{prefix}:anonymous"
 
 # -------------------- Config --------------------
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -1895,7 +1896,6 @@ async def admin_create_user(payload: AdminUserIn, _: dict = Depends(require_role
 
 # -------------------- Dashboards --------------------
 @api.get("/dashboard/student")
-@cache(expire=120, key_builder=user_key_builder)
 async def student_dashboard(user: dict = Depends(require_roles("student"))):
     try:
         # 1. Get batch/course context

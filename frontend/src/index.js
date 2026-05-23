@@ -2,17 +2,8 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import "./index.css";
 import App from "./App";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      retry: 1,
-      refetchOnWindowFocus: false,
-      staleTime: 1000 * 60 * 5, // 5 minutes default
-    },
-  },
-});
+import { QueryClientProvider } from "@tanstack/react-query";
+import { queryClient } from "./lib/queryClient";
 
 const root = ReactDOM.createRoot(document.getElementById("root"));
 root.render(
