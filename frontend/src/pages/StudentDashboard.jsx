@@ -10,7 +10,6 @@ import TodaysClasses from "../components/student/TodaysClasses";
 import { Avatar, AvatarFallback } from "../components/ui/avatar";
 import StatusPill from "../components/StatusPill";
 import { Users, Award, Target, Flame, Trophy, Video, BookOpen, ListChecks, Clock, ArrowRight, TrendingUp } from "lucide-react";
-import PaymentWall from "../components/PaymentWall";
 import { supabase } from "../lib/supabase";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -35,27 +34,6 @@ export default function StudentDashboard() {
     staleTime: 1000 * 60 * 2, // 2 minutes
   });
 
-  // Payment Status Query
-  const { 
-    data: paymentStatus,
-    isLoading: isPaymentLoading 
-  } = useQuery({
-    queryKey: ["payment", "status", user?.id],
-    queryFn: async () => {
-      try {
-        const { data } = await api.get("/payment/status");
-        return data;
-      } catch (err) {
-        if (err.response?.status === 403 && err.response?.data?.detail?.code === "ACCESS_EXPIRED") {
-          return { effective_tier: "expired" };
-        }
-        throw err;
-      }
-    },
-    enabled: !!user?.id,
-    staleTime: 1000 * 60 * 10, // 10 minutes
-  });
-
   useEffect(() => {
     if (user?.id) {
       const channel = supabase.channel(`student_batch_realtime_${user.id}`)
@@ -70,6 +48,24 @@ export default function StudentDashboard() {
     }
   }, [user?.id, queryClient]);
 
+  // Silently prefetch each enrolled course so first click lands instantly
+  useEffect(() => {
+    if (!data?.courses?.length) return;
+    const timers = data.courses.map(({ course }, index) =>
+      setTimeout(() => {
+        queryClient.prefetchQuery({
+          queryKey: ["course", course.id],
+          queryFn: async () => {
+            const { data: courseData } = await api.get(`/courses/${course.id}`);
+            return courseData;
+          },
+          staleTime: 1000 * 60 * 60,
+        });
+      }, index * 600)
+    );
+    return () => timers.forEach(clearTimeout);
+  }, [data, queryClient]);
+
   useEffect(() => {
     if (data && window.location.hash === "#courses-section") {
       const el = document.getElementById("courses-section");
@@ -80,11 +76,6 @@ export default function StudentDashboard() {
       }
     }
   }, [data]);
-
-  const isExpired = paymentStatus?.effective_tier === "expired" || user?.access_tier === "expired";
-  if (isExpired) {
-    return <PaymentWall />;
-  }
 
   if (isDashboardLoading && !data) {
     return (

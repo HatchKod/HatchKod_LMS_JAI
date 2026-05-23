@@ -1,8 +1,11 @@
-import { Navigate } from "react-router-dom";
+import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "../lib/auth";
+import PaymentWall from "./PaymentWall";
 
 export function ProtectedRoute({ children, roles }) {
   const { user, loading } = useAuth();
+  const location = useLocation();
+
   if (loading) {
     return (
       <div className="grid min-h-[40vh] place-items-center text-sm text-slate-500" data-testid="route-loading">
@@ -15,5 +18,13 @@ export function ProtectedRoute({ children, roles }) {
     const home = user.role === "admin" ? "/admin" : user.role === "mentor" ? "/mentor" : "/dashboard";
     return <Navigate to={home} replace />;
   }
+
+  if (user.role === "student" && user.access_tier === "expired") {
+    const allowedPaths = ["/dashboard", "/billing"];
+    if (!allowedPaths.includes(location.pathname)) {
+      return <PaymentWall />;
+    }
+  }
+
   return children;
 }
