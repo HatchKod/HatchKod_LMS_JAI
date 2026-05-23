@@ -94,6 +94,8 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
 
 ONBOARDING_LAMBDA_URL = os.getenv("ONBOARDING_LAMBDA_URL", "https://9vsd5hlgu3.execute-api.ap-south-1.amazonaws.com/Dev/onboard_student")
 PRODUCTION_DOMAIN = os.getenv("PRODUCTION_DOMAIN", "https://hatchkod.in")
+JUDGE0_URL = os.getenv("JUDGE0_URL", "http://13.205.4.224:2358")
+JUDGE0_AUTH_TOKEN = os.getenv("JUDGE0_AUTH_TOKEN", "")
 
 supabase = create_client(
     SUPABASE_URL,
@@ -2172,14 +2174,14 @@ async def execute_code(payload: ExecuteIn):
     if not payload.code.strip():
         raise HTTPException(status_code=400, detail="Code cannot be empty")
 
+    headers = {"X-Auth-Token": JUDGE0_AUTH_TOKEN} if JUDGE0_AUTH_TOKEN else {}
     async with httpx.AsyncClient() as client:
         try:
-            # Switch to Judge0 Public CE Instance
-            res = await client.post("https://ce.judge0.com/submissions?wait=true", json={
+            res = await client.post(f"{JUDGE0_URL}/submissions?wait=true", json={
                 "source_code": payload.code,
-                "language_id": 62, # Java (OpenJDK 13)
+                "language_id": 62,  # Java (OpenJDK 13)
                 "stdin": payload.stdin
-            }, timeout=30.0)
+            }, headers=headers, timeout=30.0)
             
             if res.status_code not in (200, 201):
                 logger.error(f"Judge0 API error {res.status_code}: {res.text}")
@@ -2649,31 +2651,27 @@ async def submit_problem(id: str, payload: ProblemSubmitIn, user: dict = Depends
     if not test_cases:
         raise HTTPException(400, "No test cases found for this problem")
 
-    client_id = os.getenv("JDOODLE_CLIENT_ID")
-    client_secret = os.getenv("JDOODLE_CLIENT_SECRET")
-    
     results = []
     all_passed = True
     overall_status = "accepted"
 
-    async with httpx.AsyncClient() as client:
-        # Map frontend language names to Judge0 language IDs
-        lang_map = {
-            "java": 62,
-            "python": 71,
-            "javascript": 63,
-            "cpp": 54
-        }
-        judge0_lang_id = lang_map.get(payload.language.lower(), 62)
+    lang_map = {
+        "java": 62,
+        "python": 71,
+        "javascript": 63,
+        "cpp": 54
+    }
+    judge0_lang_id = lang_map.get(payload.language.lower(), 62)
+    judge0_headers = {"X-Auth-Token": JUDGE0_AUTH_TOKEN} if JUDGE0_AUTH_TOKEN else {}
 
+    async with httpx.AsyncClient() as client:
         for tc in test_cases:
             try:
-                # Use Judge0 API for test case execution
-                res = await client.post("https://ce.judge0.com/submissions?wait=true", json={
+                res = await client.post(f"{JUDGE0_URL}/submissions?wait=true", json={
                     "source_code": payload.code,
                     "language_id": judge0_lang_id,
                     "stdin": tc["input"]
-                }, timeout=float(problem["time_limit_seconds"]) + 5.0)
+                }, headers=judge0_headers, timeout=float(problem["time_limit_seconds"]) + 5.0)
                 
                 if res.status_code not in (200, 201):
                     all_passed = False
