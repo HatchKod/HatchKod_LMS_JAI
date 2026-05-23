@@ -145,27 +145,18 @@ export default function NotificationBell({ initialUnreadCount }) {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const toggleDropdown = async () => {
-    const nextState = !isOpen;
-    setIsOpen(nextState);
-    if (nextState) {
-      setLoading(true);
-      try {
-        const { data } = await api.get("/notifications");
-        setNotifications(data);
-      } catch (e) {
-        toast.error("Failed to load notifications");
-      } finally {
-        setLoading(false);
-      }
-    }
+  const toggleDropdown = () => {
+    setIsOpen(prev => !prev);
+    // React Query handles the fetch automatically via enabled: isOpen && !!user?.id
   };
 
   const markAllRead = async () => {
     try {
       await api.post("/notifications/mark-read", { all: true });
-      setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
-      setUnreadCount(0);
+      queryClient.setQueryData(["notifications", "list", user?.id],
+        (old = []) => old.map(n => ({ ...n, is_read: true }))
+      );
+      queryClient.setQueryData(["notifications", "unread-count", user?.id], { count: 0 });
       toast.success("All notifications marked as read");
     } catch (e) {
       toast.error("Failed to mark all as read");
@@ -175,8 +166,12 @@ export default function NotificationBell({ initialUnreadCount }) {
   const markOneRead = async (id) => {
     try {
       await api.post("/notifications/mark-read", { notification_ids: [id] });
-      setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
-      setUnreadCount(prev => Math.max(0, prev - 1));
+      queryClient.setQueryData(["notifications", "list", user?.id],
+        (old = []) => old.map(n => n.id === id ? { ...n, is_read: true } : n)
+      );
+      queryClient.setQueryData(["notifications", "unread-count", user?.id],
+        (old) => ({ count: Math.max(0, (old?.count ?? 1) - 1) })
+      );
     } catch (e) {
       console.error(e);
     }
@@ -186,8 +181,14 @@ export default function NotificationBell({ initialUnreadCount }) {
     e.stopPropagation();
     try {
       await api.delete(`/notifications/${id}`);
-      setNotifications(prev => prev.filter(n => n.id !== id));
-      if (wasUnread) setUnreadCount(prev => Math.max(0, prev - 1));
+      queryClient.setQueryData(["notifications", "list", user?.id],
+        (old = []) => old.filter(n => n.id !== id)
+      );
+      if (wasUnread) {
+        queryClient.setQueryData(["notifications", "unread-count", user?.id],
+          (old) => ({ count: Math.max(0, (old?.count ?? 1) - 1) })
+        );
+      }
     } catch (e) {
       toast.error("Failed to delete notification");
     }
