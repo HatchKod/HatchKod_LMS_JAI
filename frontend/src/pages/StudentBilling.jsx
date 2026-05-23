@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import Navbar from "../components/Navbar";
 import { api, formatApiError } from "../lib/api";
+import { fmtDate } from "../lib/dateUtils";
 import { Card } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { useAuth } from "../lib/auth";
@@ -379,9 +380,7 @@ export default function StudentBilling() {
                         <tr key={p.id} className="text-slate-300 hover:bg-[#194BFB]/5">
                           <td className="py-4 flex items-center gap-2">
                             <Calendar className="h-3.5 w-3.5 text-slate-600" />
-                            {new Date(p.created_at).toLocaleDateString("en-IN", {
-                              year: "numeric", month: "short", day: "numeric"
-                            })}
+                            {fmtDate(p.created_at, { year: "numeric", month: "short", day: "numeric" })}
                           </td>
                           <td className="py-4">
                             <span className={`px-2 py-0.5 text-[10px] uppercase font-bold border ${

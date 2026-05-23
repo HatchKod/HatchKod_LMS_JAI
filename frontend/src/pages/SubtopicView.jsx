@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, formatApiError } from "../lib/api";
+import { fmtDate } from "../lib/dateUtils";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
@@ -106,17 +107,20 @@ export default function SubtopicView() {
   useEffect(() => {
     load();
 
-    // Listen for real-time updates from admin
     const channel = supabase.channel(`subtopic_view_${id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'subtopics', filter: `id=eq.${id}` }, () => {
-        load();
-      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'subtopics', filter: `id=eq.${id}` }, () => load())
       .subscribe();
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => supabase.removeChannel(channel);
   }, [id]);
+
+  // Poll every 5s while submission is pending so the Next button unlocks
+  // the moment a mentor approves — no page reload needed.
+  useEffect(() => {
+    if (data?.submission?.status !== 'pending') return;
+    const interval = setInterval(load, 5000);
+    return () => clearInterval(interval);
+  }, [data?.submission?.status]);
 
   useEffect(() => {
     if (window.location.hash === "#task" && taskRef.current) {
@@ -521,7 +525,7 @@ export default function SubtopicView() {
           <div className="bg-green-50 border border-green-200 rounded-sm p-3 mb-6 flex items-center gap-2">
             <CheckCircle className="text-green-500 h-4 w-4 shrink-0" />
             <span className="text-sm text-green-700">
-              You completed this subtopic{completedAt ? ` on ${new Date(completedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}` : ""}
+              You completed this subtopic{completedAt ? ` on ${fmtDate(completedAt, { day: "numeric", month: "short", year: "numeric" })}` : ""}
             </span>
             <button
               onClick={handleUndoComplete}
@@ -646,7 +650,7 @@ export default function SubtopicView() {
                               <FileUp className="h-4 w-4" />
                             </div>
                             <div className="font-bold text-sm">Upload File</div>
-                            <div className="text-[10px] text-slate-500 uppercase tracking-wider mt-1">ZIP, PDF, or Image</div>
+                            <div className="text-[10px] text-slate-500 uppercase tracking-wider mt-1">ZIP or PDF</div>
                           </button>
                         </div>
 

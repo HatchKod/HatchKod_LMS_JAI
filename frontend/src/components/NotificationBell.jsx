@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
+import { fmtDate } from "../lib/dateUtils";
 import { api, formatApiError } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { 
@@ -204,7 +205,7 @@ export default function NotificationBell({ initialUnreadCount }) {
     if (diffInSecs < 86400) return `${Math.floor(diffInSecs / 3600)}h ago`;
     if (diffInSecs < 604800) return `${Math.floor(diffInSecs / 86400)}d ago`;
     
-    return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+    return fmtDate(date, { day: 'numeric', month: 'short' });
   };
 
   const getTypeIcon = (type) => {
@@ -283,9 +284,6 @@ export default function NotificationBell({ initialUnreadCount }) {
                     key={n.id}
                     onClick={() => {
                       if (!n.is_read) markOneRead(n.id);
-                      if (n.type === 'class_live') navigate('/student');
-                      if (n.type === 'recording_uploaded') navigate('/student'); // Will scroll to recordings
-                      setIsOpen(false);
                     }}
                     className={`flex items-start gap-3 px-4 py-4 cursor-pointer transition-colors relative group ${!n.is_read ? 'bg-blue-50/50 hover:bg-blue-50' : 'bg-white hover:bg-slate-50'}`}
                   >

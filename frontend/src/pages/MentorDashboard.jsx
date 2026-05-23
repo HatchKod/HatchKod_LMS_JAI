@@ -28,6 +28,7 @@ import MentorRecordings from "../components/mentor/MentorRecordings";
 import MentorProgress from "../components/mentor/MentorProgress";
 import { BarChart2 } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
+import { fmtDateTime } from "../lib/dateUtils";
 
 export default function MentorDashboard() {
   const { user } = useAuth();
@@ -37,6 +38,7 @@ export default function MentorDashboard() {
   const [active, setActive] = useState(null);
   const [feedback, setFeedback] = useState("");
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState(searchParams.get("tab") || "reviews");
   const [batches, setBatches] = useState([]);
 
@@ -45,8 +47,10 @@ export default function MentorDashboard() {
     setStats(s.data); setPending(p.data);
   };
   useEffect(() => {
-    load();
-    api.get("/batches/mentor").then(r => setBatches(r.data || [])).catch(() => {});
+    Promise.all([
+      load(),
+      api.get("/batches/mentor").then(r => setBatches(r.data || [])).catch(() => {})
+    ]).finally(() => setLoading(false));
   }, []);
 
   const selectSubmission = async (s) => {
@@ -73,6 +77,63 @@ export default function MentorDashboard() {
       toast.error(formatApiError(e.response?.data?.detail) || "Failed");
     } finally { setBusy(false); }
   };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-white">
+        <Navbar />
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 py-8">
+          {/* Header skeleton */}
+          <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
+            <div>
+              <div className="h-2.5 w-28 bg-slate-100 rounded animate-pulse mb-3" />
+              <div className="h-9 w-44 bg-slate-100 rounded animate-pulse" />
+            </div>
+            <div className="h-10 w-80 bg-slate-100 rounded-sm animate-pulse" />
+          </div>
+
+          {/* Stats skeleton */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-px bg-border border border-border">
+            {[1, 2, 3].map(i => (
+              <div key={i} className="bg-white p-5 space-y-3">
+                <div className="h-2.5 w-24 bg-slate-100 rounded animate-pulse" />
+                <div className="h-8 w-12 bg-slate-100 rounded animate-pulse" />
+              </div>
+            ))}
+          </div>
+
+          {/* Content skeleton */}
+          <div className="mt-8 grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {/* Sidebar list skeleton */}
+            <div className="lg:col-span-4 border border-border rounded-sm overflow-hidden">
+              <div className="border-b border-border p-3 bg-[#F4F5F7]">
+                <div className="h-2.5 w-36 bg-slate-200 rounded animate-pulse" />
+              </div>
+              {[1, 2, 3, 4, 5].map(i => (
+                <div key={i} className="p-3 border-b border-border space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="h-3.5 w-3/4 bg-slate-100 rounded animate-pulse" />
+                    <div className="h-5 w-16 bg-slate-100 rounded-full animate-pulse" />
+                  </div>
+                  <div className="h-2.5 w-1/3 bg-slate-100 rounded animate-pulse" />
+                  <div className="h-2 w-1/2 bg-slate-50 rounded animate-pulse" />
+                </div>
+              ))}
+            </div>
+
+            {/* Main panel skeleton */}
+            <div className="lg:col-span-8 border border-dashed border-border rounded-sm flex items-center justify-center min-h-[340px]">
+              <div className="text-center space-y-3">
+                <div className="h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-[#194BFB] mx-auto" />
+                <div className="h-3 w-40 bg-slate-100 rounded animate-pulse mx-auto" />
+                <div className="h-2.5 w-28 bg-slate-50 rounded animate-pulse mx-auto" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-white" data-testid="mentor-dashboard">
@@ -128,7 +189,7 @@ export default function MentorDashboard() {
                           <StatusPill status={s.status} />
                         </div>
                         <div className="text-xs text-slate-500 mt-0.5">{s.student?.name || "Student"}</div>
-                        <div className="text-[10px] text-slate-400 font-mono mt-0.5">{new Date(s.submitted_at).toLocaleString()}</div>
+                        <div className="text-[10px] text-slate-400 font-mono mt-0.5">{fmtDateTime(s.submitted_at)}</div>
                       </button>
                     ))}
                   </div>

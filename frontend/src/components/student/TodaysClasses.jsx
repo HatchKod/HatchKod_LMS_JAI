@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../../lib/supabase";
 import { api, formatApiError } from "../../lib/api";
+import { fmtDate, fmtTime, istDay, istMonth } from "../../lib/dateUtils";
 import { Card } from "../ui/card";
 import { Button } from "../ui/button";
 import { 
@@ -180,7 +181,7 @@ export default function TodaysClasses() {
       <div className="flex flex-col gap-1">
         <h2 className="font-['Outfit'] font-bold text-lg text-slate-900 tracking-tight">Today's Classes</h2>
         <span className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">
-          {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}
+          {fmtDate(new Date(), { weekday: 'long', day: 'numeric', month: 'long' })}
         </span>
       </div>
 
@@ -295,7 +296,7 @@ function ClassCard({ session, onJoin, isJoining }) {
           <div className="flex items-center gap-2 text-[11px] font-medium text-slate-500">
             <Clock className="w-3 h-3 text-slate-300" />
             <span>
-              {session.status === 'live' ? 'Started' : 'Scheduled'} at {new Date(session.scheduled_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              {session.status === 'live' ? 'Started' : 'Scheduled'} at {fmtTime(session.scheduled_at, { hour: '2-digit', minute: '2-digit' })}
             </span>
           </div>
           {session.status === 'live' && (
@@ -346,10 +347,9 @@ function ClassCard({ session, onJoin, isJoining }) {
 }
 
 function UpcomingRow({ session }) {
-  const sDate = new Date(session.scheduled_at);
-  const day = sDate.getDate();
-  const month = sDate.toLocaleString('en-US', { month: 'short' });
-  const time = sDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const day = istDay(session.scheduled_at);
+  const month = istMonth(session.scheduled_at);
+  const time = fmtTime(session.scheduled_at, { hour: '2-digit', minute: '2-digit' });
 
   return (
     <div className="flex items-center gap-4 py-3 border-b border-slate-100 last:border-0 hover:bg-slate-50/50 px-1 transition-colors">

@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo, Fragment } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import Navbar from "../components/Navbar";
+import { fmtDate } from "../lib/dateUtils";
 import { api, formatApiError } from "../lib/api";
 import { Card } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -677,7 +678,7 @@ function UsersPanel({ students, mentors, inactiveUsers, stats, refresh }) {
                         </span>
                       </td>
                       <td className="px-6 py-4 text-slate-400 text-xs">
-                        {new Date(u.created_at).toLocaleDateString()}
+                        {fmtDate(u.created_at)}
                       </td>
                       <td className="px-6 py-4 text-right">
                         <Button 
@@ -790,7 +791,7 @@ function BatchCard({ batch, isSelected, onSelect, refresh, courses, mentors }) {
       </div>
 
       <div className="text-[11px] text-slate-400 mb-4">
-        {batch.start_date ? `Started: ${new Date(batch.start_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}` : "No start date"}
+        {batch.start_date ? `Started: ${fmtDate(batch.start_date, { day: 'numeric', month: 'short', year: 'numeric' })}` : "No start date"}
       </div>
 
       <div className="flex items-center gap-2">

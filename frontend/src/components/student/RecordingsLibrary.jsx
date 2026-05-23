@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { api, formatApiError } from "../../lib/api";
+import { fmtDate, istDay, istMonth } from "../../lib/dateUtils";
 import { Card } from "../ui/card";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -139,9 +140,8 @@ export default function RecordingsLibrary() {
 }
 
 function RecordingCard({ recording }) {
-  const dateObj = new Date(recording.scheduled_at);
-  const day = dateObj.getDate();
-  const month = dateObj.toLocaleString('en-US', { month: 'short' });
+  const day = istDay(recording.scheduled_at);
+  const month = istMonth(recording.scheduled_at);
 
   return (
     <Card className="p-3 rounded-sm border-slate-200 hover:border-slate-300 hover:bg-slate-50/50 transition-all group">
@@ -158,7 +158,7 @@ function RecordingCard({ recording }) {
           <div className="flex items-center gap-2 text-[10px] text-slate-400 font-bold uppercase tracking-tight mt-1">
             <div className="flex items-center gap-1"><Clock className="h-3 w-3" /> {recording.duration_minutes ? `${recording.duration_minutes} min` : 'Duration unknown'}</div>
             <span className="text-slate-200">|</span>
-            <div>Uploaded {new Date(recording.uploaded_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</div>
+            <div>Uploaded {fmtDate(recording.uploaded_at, { day: 'numeric', month: 'short' })}</div>
           </div>
         </div>
 

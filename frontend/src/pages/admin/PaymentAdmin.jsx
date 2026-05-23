@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import Navbar from "../../components/Navbar";
+import { fmtDateTime } from "../../lib/dateUtils";
 import { toast } from "sonner";
 import { 
   fetchAdminStudents, 
@@ -601,7 +602,7 @@ export default function PaymentAdmin() {
                   {paymentHistory.map((p) => (
                     <tr key={p.id} className="hover:bg-slate-50/50 font-mono">
                       <td className="px-4 py-3 text-slate-500">
-                        {new Date(p.created_at).toLocaleString()}
+                        {fmtDateTime(p.created_at)}
                       </td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex px-1.5 py-0.5 text-[9px] font-bold uppercase border ${
