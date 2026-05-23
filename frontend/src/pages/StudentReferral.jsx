@@ -5,6 +5,7 @@ import { useAuth } from "../lib/auth";
 import Navbar from "../components/Navbar";
 import { Card } from "../components/ui/card";
 import { useNavigate } from "react-router-dom";
+import { fmtDate } from "../lib/dateUtils";
 
 export default function StudentReferral() {
   const { user } = useAuth();
@@ -178,7 +179,7 @@ export default function StudentReferral() {
                     {referralData.referrals.map((r, i) => (
                       <tr key={i} className="border-b last:border-0 border-border hover:bg-slate-50/50 transition-colors">
                         <td className="px-8 py-5 font-semibold text-slate-800 whitespace-nowrap">{r.referred_name}</td>
-                        <td className="px-8 py-5 text-xs text-slate-500 font-mono whitespace-nowrap">{r.created_at ? new Date(r.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : "—"}</td>
+                        <td className="px-8 py-5 text-xs text-slate-500 font-mono whitespace-nowrap">{r.created_at ? fmtDate(r.created_at, { year: 'numeric', month: 'short', day: 'numeric' }) : "—"}</td>
                         <td className="px-8 py-5 whitespace-nowrap">
                           <span className={`inline-flex items-center px-2.5 py-1 text-[9px] font-black uppercase tracking-widest rounded-sm ${
                             r.status === "paid" ? "bg-[#10B981]/10 text-[#10B981]" :

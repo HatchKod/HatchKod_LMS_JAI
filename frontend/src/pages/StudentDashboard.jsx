@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { fmtDate, fmtDateTime } from "../lib/dateUtils";
 import Navbar from "../components/Navbar";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -277,7 +278,7 @@ export default function StudentDashboard() {
                     </div>
                     <div className="space-y-1">
                       <div className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">START DATE</div>
-                      <div className="text-xs font-semibold text-slate-700">{new Date(course.created_at).toLocaleDateString()}</div>
+                      <div className="text-xs font-semibold text-slate-700">{fmtDate(course.created_at)}</div>
                     </div>
                     <div className="space-y-1">
                       <div className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">COURSE TYPE</div>
@@ -337,7 +338,7 @@ export default function StudentDashboard() {
                 className="flex items-center justify-between p-5 border-b last:border-b-0 border-border hover:bg-slate-50 transition-colors group" data-testid={`pending-row-${s.id}`}>
                 <div>
                   <div className="font-bold text-slate-800 group-hover:text-[#194BFB]">{s.topic?.title || "Topic"}</div>
-                  <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-1">submitted {new Date(s.submitted_at).toLocaleString()}</div>
+                  <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-1">submitted {fmtDateTime(s.submitted_at)}</div>
                 </div>
                 <StatusPill status={s.status} />
               </Link>

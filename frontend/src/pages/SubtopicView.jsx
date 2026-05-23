@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, formatApiError } from "../lib/api";
+import { fmtDate } from "../lib/dateUtils";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
@@ -524,7 +525,7 @@ export default function SubtopicView() {
           <div className="bg-green-50 border border-green-200 rounded-sm p-3 mb-6 flex items-center gap-2">
             <CheckCircle className="text-green-500 h-4 w-4 shrink-0" />
             <span className="text-sm text-green-700">
-              You completed this subtopic{completedAt ? ` on ${new Date(completedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}` : ""}
+              You completed this subtopic{completedAt ? ` on ${fmtDate(completedAt, { day: "numeric", month: "short", year: "numeric" })}` : ""}
             </span>
             <button
               onClick={handleUndoComplete}

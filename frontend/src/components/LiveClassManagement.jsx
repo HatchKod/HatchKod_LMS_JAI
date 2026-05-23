@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, formatApiError } from "../lib/api";
+import { fmtDate, fmtTime } from "../lib/dateUtils";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -256,13 +257,11 @@ export default function LiveClassManagement({ role, userId }) {
                     <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[11px] text-slate-500 font-medium">
                       <div className="flex items-center gap-1.5">
                         <Calendar className="h-3.5 w-3.5 text-slate-300" />
-                        {new Date(c.scheduled_at).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}
+                        {fmtDate(c.scheduled_at, { weekday: 'short', day: 'numeric', month: 'short' })}
                       </div>
                       <div className="flex items-center gap-1.5">
                         <Clock className="h-3.5 w-3.5 text-slate-300" />
-                        {new Date(c.scheduled_at).toLocaleTimeString('en-IN', {
-                          hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kolkata', hour12: true
-                        })}
+                        {fmtTime(c.scheduled_at, { hour: 'numeric', minute: '2-digit', hour12: true })}
                       </div>
                       <div className="flex items-center gap-1.5">
                         <span className="font-bold text-[#194BFB] bg-blue-50 px-2 py-0.5 rounded-sm border border-blue-100">{c.batch_name}</span>

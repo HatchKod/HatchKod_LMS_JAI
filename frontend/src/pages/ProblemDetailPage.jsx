@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { fmtDateTime } from "../lib/dateUtils";
 import { useParams, Link } from "react-router-dom";
 import Editor from "@monaco-editor/react";
 import { Card } from "../components/ui/card";
@@ -329,7 +330,7 @@ export default function ProblemDetailPage() {
                             {sub.status.replace('_', ' ')}
                           </div>
                           <div className="text-[10px] text-slate-400 font-medium">
-                            {new Date(sub.submitted_at).toLocaleString()}
+                            {fmtDateTime(sub.submitted_at)}
                           </div>
                         </div>
                       </div>

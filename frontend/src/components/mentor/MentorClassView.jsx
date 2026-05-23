@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { fmtDateTime } from "../../lib/dateUtils";
 import { useParams, useNavigate } from "react-router-dom";
 import { api, formatApiError } from "../../lib/api";
 import { Card } from "../ui/card";
@@ -188,7 +189,7 @@ export default function MentorClassView() {
                   <Badge variant="outline" className="rounded-full uppercase tracking-widest text-[10px] font-bold">
                     {session.status}
                   </Badge>
-                  <span>Scheduled for {new Date(session.scheduled_at).toLocaleString()}</span>
+                  <span>Scheduled for {fmtDateTime(session.scheduled_at)}</span>
                 </div>
               </div>
               {session.status === 'live' && (

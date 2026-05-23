@@ -28,6 +28,7 @@ import MentorRecordings from "../components/mentor/MentorRecordings";
 import MentorProgress from "../components/mentor/MentorProgress";
 import { BarChart2 } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
+import { fmtDateTime } from "../lib/dateUtils";
 
 export default function MentorDashboard() {
   const { user } = useAuth();
@@ -188,7 +189,7 @@ export default function MentorDashboard() {
                           <StatusPill status={s.status} />
                         </div>
                         <div className="text-xs text-slate-500 mt-0.5">{s.student?.name || "Student"}</div>
-                        <div className="text-[10px] text-slate-400 font-mono mt-0.5">{new Date(s.submitted_at).toLocaleString()}</div>
+                        <div className="text-[10px] text-slate-400 font-mono mt-0.5">{fmtDateTime(s.submitted_at)}</div>
                       </button>
                     ))}
                   </div>

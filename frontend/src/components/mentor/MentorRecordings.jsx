@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { api, formatApiError } from "../../lib/api";
+import { fmtDate, fmtTime } from "../../lib/dateUtils";
 import { Card } from "../ui/card";
 import { Button } from "../ui/button";
 import { 
@@ -104,8 +105,8 @@ export default function MentorRecordings() {
 }
 
 function RecordingRow({ recording, isExpanded, onToggle, onUpdate }) {
-  const dateStr = new Date(recording.scheduled_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
-  const timeStr = new Date(recording.scheduled_at).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true });
+  const dateStr = fmtDate(recording.scheduled_at, { day: 'numeric', month: 'short', year: 'numeric' });
+  const timeStr = fmtTime(recording.scheduled_at, { hour: 'numeric', minute: '2-digit', hour12: true });
 
   return (
     <div className="group">
