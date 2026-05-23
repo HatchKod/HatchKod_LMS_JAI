@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, Fragment } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import { api, formatApiError } from "../lib/api";
@@ -39,9 +39,12 @@ import {
   X,
   Eye,
   EyeOff,
-  Loader2
+  Loader2,
+  Gift,
+  ChevronRight
 } from "lucide-react";
 import { toast } from "sonner";
+import { supabase } from "../lib/supabase";
 
 export default function AdminDashboard() {
   const [stats, setStats] = useState(null);
@@ -87,7 +90,20 @@ export default function AdminDashboard() {
     setPageLoading(false);
   };
   
-  useEffect(() => { refresh(); }, []);
+  useEffect(() => { 
+    refresh(); 
+    
+    // Listen for new users (e.g. from referrals)
+    const channel = supabase.channel('admin_users_realtime')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'users' }, () => {
+        refresh();
+      })
+      .subscribe();
+      
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   if (pageLoading) {
     return (
@@ -129,6 +145,14 @@ export default function AdminDashboard() {
                 <LayoutGrid className="mr-2 h-4 w-4" />
                 Batches
               </TabsTrigger>
+              <TabsTrigger 
+                value="referrals" 
+                className="rounded-none border-b-2 border-transparent data-[state=active]:border-[#194BFB] data-[state=active]:bg-transparent data-[state=active]:shadow-none px-1 py-3 text-sm font-medium transition-all"
+                data-testid="tab-referrals"
+              >
+                <Gift className="mr-2 h-4 w-4" />
+                Referrals
+              </TabsTrigger>
             </TabsList>
 
             <div className="flex items-center">
@@ -155,6 +179,9 @@ export default function AdminDashboard() {
               courses={courses} 
               mentors={mentors}
             />
+          </TabsContent>
+          <TabsContent value="referrals" className="mt-0 outline-none">
+            <ReferralsPanel />
           </TabsContent>
         </Tabs>
       </div>
@@ -1031,3 +1058,289 @@ function UpsertBatchDialog({ refresh, courses, mentors, batch, children }) {
     </Dialog>
   );
 }
+
+function ReferralsPanel() {
+  const [referrals, setReferrals] = useState([]);
+  const [leaderboard, setLeaderboard] = useState([]);
+  const [subTab, setSubTab] = useState("all");
+  const [mainFilter, setMainFilter] = useState("all");
+  const [utrModal, setUtrModal] = useState(null);
+  const [utrInput, setUtrInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  const fetchReferrals = async () => {
+    setLoading(true);
+    try {
+      const { data } = await api.get("/admin/referrals");
+      setReferrals(data);
+    } catch (e) {
+      toast.error("Failed to load referrals");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchLeaderboard = async () => {
+    try {
+      const { data } = await api.get("/admin/referral-leaderboard");
+      setLeaderboard(data);
+    } catch (e) {
+      // silent fail
+    }
+  };
+
+  useEffect(() => {
+    fetchReferrals();
+    fetchLeaderboard();
+    
+    // Listen for real-time updates to referrals (e.g., when a referred student pays)
+    const channel = supabase.channel('admin_referrals_realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'referrals' }, () => {
+        fetchReferrals();
+        fetchLeaderboard();
+      })
+      .subscribe();
+      
+    return () => supabase.removeChannel(channel);
+  }, []);
+
+  const filteredReferrals = useMemo(() => {
+    return referrals.filter(r => {
+      if (mainFilter === "all") return true;
+      return r.status === mainFilter;
+    });
+  }, [referrals, mainFilter]);
+
+  const markPaid = async () => {
+    if (!utrInput.trim()) return toast.error("UTR number is required");
+    setBusy(true);
+    try {
+      await api.post(`/admin/referrals/${utrModal.id}/mark-paid`, { utr_number: utrInput.trim() });
+      toast.success("Referral marked as paid!");
+      setUtrModal(null);
+      setUtrInput("");
+      fetchReferrals();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Failed to mark as paid");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const rejectReferral = async (ref) => {
+    if (!confirm(`Reject referral from ${ref.referrer?.name}?`)) return;
+    try {
+      await api.post(`/admin/referrals/${ref.id}/reject`);
+      toast.success("Referral rejected");
+      fetchReferrals();
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "Failed to reject");
+    }
+  };
+
+  const pendingPayouts = referrals.filter(r => r.status === "pending" && r.referred?.access_tier === "full").reduce((acc, curr) => acc + (curr.payout_amount || 0), 0);
+  const totalPaid = referrals.filter(r => r.status === "paid").reduce((acc, curr) => acc + (curr.payout_amount || 0), 0);
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="bg-white p-6 rounded-lg border border-slate-100 shadow-sm border-l-4 border-l-amber-400">
+          <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Total Pending Payouts</div>
+          <div className="text-3xl font-black text-amber-500">₹{pendingPayouts.toLocaleString("en-IN")}</div>
+        </div>
+        <div className="bg-white p-6 rounded-lg border border-slate-100 shadow-sm border-l-4 border-l-emerald-500">
+          <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Total Paid To Referrers</div>
+          <div className="text-3xl font-black text-emerald-500">₹{totalPaid.toLocaleString("en-IN")}</div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-lg shadow-sm border border-slate-100 overflow-hidden">
+        <div className="flex items-center gap-1 p-2 bg-slate-50 border-b border-slate-100">
+          <button 
+            onClick={() => setSubTab("all")}
+            className={`px-4 py-2 text-[10px] font-bold uppercase tracking-widest rounded-sm ${subTab === "all" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:bg-slate-200/50"}`}
+          >Referrals</button>
+          <button 
+            onClick={() => setSubTab("leaderboard")}
+            className={`px-4 py-2 text-[10px] font-bold uppercase tracking-widest rounded-sm ${subTab === "leaderboard" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:bg-slate-200/50"}`}
+          >Leaderboard</button>
+        </div>
+
+        <div className="p-4">
+          {subTab === "all" && (
+            <>
+              <div className="flex flex-col gap-2 mb-4">
+                <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                  <span className="text-xs font-bold text-slate-400 uppercase tracking-wider whitespace-nowrap">Filter:</span>
+                  {["all", "pending", "paid", "rejected"].map(f => (
+                    <button
+                      key={f}
+                      onClick={() => setMainFilter(f)}
+                      className={`px-4 py-1.5 text-[10px] font-black rounded-sm uppercase tracking-widest border transition-all whitespace-nowrap ${
+                        mainFilter === f
+                          ? "bg-[#194BFB] text-white border-[#194BFB]"
+                          : "bg-white text-slate-500 border-slate-200 hover:border-[#194BFB]"
+                      }`}
+                    >
+                      {f}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {loading ? (
+                <div className="py-12 flex justify-center"><Loader2 className="h-6 w-6 animate-spin text-[#194BFB]" /></div>
+              ) : (
+                <div className="overflow-x-auto border border-slate-100 rounded-lg">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-100 text-[10px] uppercase tracking-widest font-bold text-slate-500">
+                        <th className="px-6 py-4 text-left">Referrer</th>
+                        <th className="px-6 py-4 text-left">Referred Student</th>
+                        <th className="px-6 py-4 text-left">Journey Pipeline</th>
+                        <th className="px-6 py-4 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {filteredReferrals.map(r => (
+                        <tr key={r.id} className="hover:bg-slate-50 transition-colors">
+                          <td className="px-6 py-4 font-semibold text-slate-800">
+                            <div>{r.referrer?.name || "—"}</div>
+                            {r.referrer?.upi_id && (
+                              <div className="text-[10px] text-slate-400 font-mono mt-0.5">UPI: {r.referrer.upi_id}</div>
+                            )}
+                          </td>
+                          <td className="px-6 py-4 text-slate-600">{r.referred?.name || "—"}</td>
+                          <td className="px-6 py-4">
+                            {(() => {
+                              const tier = r.referred?.access_tier || "demo";
+                              let level = 0;
+                              if (r.status === "paid") level = 5;
+                              else if (r.status === "pending" && tier === "full") level = 4;
+                              else if (tier === "full") level = 3;
+                              else if (tier === "partial") level = 2;
+                              else if (tier === "expired" || tier === "demo") level = 1;
+                              
+                              const steps = [{label: "Reg"}, {label: "Demo"}, {label: "Partial"}, {label: "Full"}, {label: "Pending"}, {label: "Paid"}];
+                              
+                              return (
+                                <div className="flex flex-col gap-1.5">
+                                  <div className="flex items-center gap-0.5 flex-wrap">
+                                    {steps.map((step, idx) => {
+                                      const isCompleted = idx <= level;
+                                      const isRejected = r.status === "rejected" && idx === 4;
+                                      return (
+                                        <Fragment key={idx}>
+                                          <div className={`text-[9px] font-bold px-1.5 py-0.5 rounded-sm uppercase tracking-wider border ${isRejected ? 'bg-red-50 text-red-500 border-red-200' : isCompleted ? 'bg-emerald-50 text-emerald-600 border-emerald-200 shadow-sm' : 'bg-slate-50 text-slate-300 border-slate-100'}`}>
+                                            {isRejected ? "Rejected" : step.label}
+                                          </div>
+                                          {idx < steps.length - 1 && <ChevronRight className={`h-3 w-3 ${isCompleted ? 'text-emerald-400' : 'text-slate-200'}`} />}
+                                        </Fragment>
+                                      );
+                                    })}
+                                  </div>
+                                  {r.status === "paid" && r.utr_number && <div className="text-[9px] text-slate-400 font-mono">UTR: {r.utr_number}</div>}
+                                  <div className="text-[10px] text-slate-400 font-medium mt-1">Payout: <strong className="text-slate-800">₹{(r.payout_amount || 0).toLocaleString("en-IN")}</strong></div>
+                                </div>
+                              );
+                            })()}
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                            {r.status === "pending" && r.referred?.access_tier === "full" && (
+                              <div className="flex items-center justify-end gap-2">
+                                <Button size="sm" className="h-7 px-3 text-[10px] font-bold bg-emerald-500 hover:bg-emerald-600 text-white rounded-sm uppercase tracking-wider" onClick={() => { setUtrModal(r); setUtrInput(""); }}>Mark Paid</Button>
+                                <Button size="sm" variant="ghost" className="h-7 px-3 text-[10px] font-bold text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-sm uppercase tracking-wider" onClick={() => rejectReferral(r)}>Reject</Button>
+                              </div>
+                            )}
+                            {r.status === "paid" && <span className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest flex items-center justify-end gap-1"><CheckCircle className="w-3 h-3" /> Settled</span>}
+                          </td>
+                        </tr>
+                      ))}
+                      {filteredReferrals.length === 0 && <tr><td colSpan="4" className="px-6 py-12 text-center text-slate-400 italic text-sm">No referrals found.</td></tr>}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          )}
+
+          {subTab === "leaderboard" && (
+            <div className="border border-slate-100 rounded-lg overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-100 text-[10px] uppercase tracking-widest font-bold text-slate-500">
+                    <th className="px-6 py-4 text-left">Rank</th>
+                    <th className="px-6 py-4 text-left">Student</th>
+                    <th className="px-6 py-4 text-right">Total Successful</th>
+                    <th className="px-6 py-4 text-right">Total Earnings</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {leaderboard.map((u, i) => (
+                    <tr key={u.referrer_id} className="hover:bg-slate-50">
+                      <td className="px-6 py-4">
+                        <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black ${i === 0 ? "bg-amber-100 text-amber-600" : i === 1 ? "bg-slate-200 text-slate-600" : i === 2 ? "bg-orange-100 text-orange-700" : "bg-slate-50 text-slate-400"}`}>
+                          #{i + 1}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 font-bold text-slate-800">{u.name || "Unknown"}</td>
+                      <td className="px-6 py-4 text-right font-mono text-slate-600">{u.count}</td>
+                      <td className="px-6 py-4 text-right font-bold text-emerald-600">₹{(u.total_earned || 0).toLocaleString("en-IN")}</td>
+                    </tr>
+                  ))}
+                  {leaderboard.length === 0 && <tr><td colSpan="4" className="px-6 py-12 text-center text-slate-400 italic text-sm">No leaderboard data yet.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <Dialog open={!!utrModal} onOpenChange={() => { setUtrModal(null); setUtrInput(""); }}>
+        <DialogContent className="max-w-md p-0 border-0 overflow-hidden bg-white">
+          <div className="bg-[#194BFB] p-6 text-white text-center">
+            <Gift className="w-12 h-12 mx-auto mb-4 opacity-50" />
+            <h2 className="text-xl font-bold font-[Outfit]">Mark Payout as Paid</h2>
+            <p className="text-blue-100 text-sm mt-2 opacity-80">
+              Record the transaction details to settle this referral.
+            </p>
+          </div>
+          <div className="p-6 space-y-4">
+            <div className="space-y-2">
+              <Label className="text-[10px] uppercase font-bold text-slate-400 tracking-widest">Referrer Name</Label>
+              <div className="font-bold text-slate-800">{utrModal?.referrer?.name}</div>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-[10px] uppercase font-bold text-slate-400 tracking-widest">Referrer UPI ID</Label>
+              <div className="font-mono text-[#194BFB] p-3 bg-blue-50 rounded-md border border-blue-100">
+                {utrModal?.referrer?.upi_id || "No UPI ID provided"}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-[10px] uppercase font-bold text-slate-400 tracking-widest">Amount to Pay</Label>
+              <div className="font-black text-emerald-600 text-xl">₹{(utrModal?.payout_amount || 0).toLocaleString("en-IN")}</div>
+            </div>
+            <div className="space-y-2 pt-2">
+              <Label className="text-[10px] uppercase font-bold text-slate-400 tracking-widest">Bank UTR / Transaction ID *</Label>
+              <Input
+                placeholder="Enter 12-digit UTR..."
+                value={utrInput}
+                onChange={(e) => setUtrInput(e.target.value)}
+                className="font-mono uppercase h-12"
+              />
+            </div>
+            <Button 
+              className="w-full h-12 rounded-sm bg-emerald-500 hover:bg-emerald-600 text-white font-bold uppercase tracking-widest mt-4"
+              onClick={markPaid}
+              disabled={busy}
+            >
+              {busy ? "Processing..." : "Confirm & Mark Paid"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+

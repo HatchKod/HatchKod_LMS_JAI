@@ -41,10 +41,9 @@ export function AuthProvider({ children }) {
 
   const register = async (payload) => {
     try {
-      const { data } = await api.post("/auth/register", payload);
-      tokenStore.set(data.token);
-      setUser(data.user);
-      return { ok: true, user: data.user };
+      await api.post("/auth/register", payload);
+      // Don't auto-login — user must sign in manually after registration
+      return { ok: true };
     } catch (e) {
       return { ok: false, error: formatApiError(e.response?.data?.detail) || e.message };
     }

@@ -14,38 +14,48 @@ import {
   Loader2
 } from "lucide-react";
 import { toast } from "sonner";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 export default function NotificationBell({ initialUnreadCount }) {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const [notifications, setNotifications] = useState([]);
-  const [unreadCount, setUnreadCount] = useState(initialUnreadCount ?? 0);
   const [isOpen, setIsOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
   const dropdownRef = useRef(null);
 
-  useEffect(() => {
-    if (initialUnreadCount !== undefined) {
-      setUnreadCount(initialUnreadCount);
-    }
-  }, [initialUnreadCount]);
+  // Unread Count Query
+  const { data: unreadData } = useQuery({
+    queryKey: ["notifications", "unread-count", user?.id],
+    queryFn: async () => {
+      const { data } = await api.get("/notifications/unread-count");
+      return data;
+    },
+    enabled: !!user?.id,
+    staleTime: 1000 * 30, // 30 seconds
+    initialData: initialUnreadCount !== undefined ? { count: initialUnreadCount } : undefined,
+  });
+
+  const unreadCount = unreadData?.count ?? 0;
+
+  // Notifications List Query
+  const { 
+    data: notifications = [], 
+    isLoading: loading,
+    refetch: refetchNotifications 
+  } = useQuery({
+    queryKey: ["notifications", "list", user?.id],
+    queryFn: async () => {
+      const { data } = await api.get("/notifications");
+      return data;
+    },
+    enabled: isOpen && !!user?.id,
+    staleTime: 1000 * 60, // 1 minute
+  });
 
   useEffect(() => {
-    if (!user) return;
+    if (!user?.id) return;
 
-    // Initial Unread Count (skip if provided via props)
-    const fetchUnreadCount = async () => {
-      if (initialUnreadCount !== undefined) return;
-      try {
-        const { data } = await api.get("/notifications/unread-count");
-        setUnreadCount(data.count);
-      } catch (e) {
-        console.error("Failed to fetch unread count", e);
-      }
-    };
-    fetchUnreadCount();
-
-    // Realtime subscription (Postgres changes for persistence)
+    // Realtime subscription
     const dbChannel = supabase
       .channel('notifications-db-' + user.id)
       .on('postgres_changes', {
@@ -54,21 +64,19 @@ export default function NotificationBell({ initialUnreadCount }) {
         table: 'notifications',
         filter: 'user_id=eq.' + user.id
       }, (payload) => {
-        // Only handle if we didn't already get it via broadcast
-        setUnreadCount(prev => prev + 1);
-        // We don't toast here to avoid double-toasting if broadcast already did it
-        // unless it's a type that doesn't have broadcast
+        queryClient.invalidateQueries({ queryKey: ["notifications", "unread-count", user.id] });
+        queryClient.invalidateQueries({ queryKey: ["notifications", "list", user.id] });
         if (payload.new.type !== 'class_reminder') {
           showNotificationToast(payload.new);
         }
       })
       .subscribe();
 
-    // Broadcast subscription (Direct client-to-client for instant delivery)
     const broadcastChannel = supabase
       .channel(`user-notifications-${user.id}`)
       .on('broadcast', { event: 'new-reminder' }, ({ payload }) => {
-        setUnreadCount(prev => prev + 1);
+        queryClient.invalidateQueries({ queryKey: ["notifications", "unread-count", user.id] });
+        queryClient.invalidateQueries({ queryKey: ["notifications", "list", user.id] });
         showNotificationToast(payload);
       })
       .subscribe();
@@ -77,7 +85,7 @@ export default function NotificationBell({ initialUnreadCount }) {
       supabase.removeChannel(dbChannel);
       supabase.removeChannel(broadcastChannel);
     };
-  }, [user, navigate]);
+  }, [user?.id, queryClient]);
 
   const handleJoinClass = async (sessionId) => {
     if (!sessionId) {

@@ -8,6 +8,7 @@ import { useAuth } from "../lib/auth";
 import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from "../components/ui/tooltip";
 import { toast } from "sonner";
 import { supabase } from "../lib/supabase";
+import PaymentWall from "../components/PaymentWall";
 
 export default function CourseView() {
   const { id } = useParams();
@@ -15,20 +16,45 @@ export default function CourseView() {
   const [course, setCourse] = useState(null);
   const [openModules, setOpenModules] = useState({});
   const [openTopics, setOpenTopics] = useState({});
+  const [paymentStatus, setPaymentStatus] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (user?.role !== "student") return;
+    (async () => {
+      try {
+        const { data } = await api.get("/payment/status");
+        setPaymentStatus(data);
+      } catch (err) {
+        if (err.response?.status === 403 && err.response?.data?.detail?.code === "ACCESS_EXPIRED") {
+          setPaymentStatus({ effective_tier: "expired" });
+        }
+      }
+    })();
+  }, [user?.access_tier, user?.role]);
 
   const load = async () => {
-    const { data } = await api.get(`/courses/${id}`);
-    setCourse(data);
-    // Open all modules and topics by default
-    if (data?.modules) {
-      const mOpen = {};
-      const tOpen = {};
-      data.modules.forEach(m => {
-        mOpen[m.id] = true;
-        (m.topics || []).forEach(t => { tOpen[t.id] = true; });
-      });
-      setOpenModules(mOpen);
-      setOpenTopics(tOpen);
+    try {
+      setLoading(true);
+      const { data } = await api.get(`/courses/${id}`);
+      setCourse(data);
+      
+      // Open all modules and topics by default on first load
+      if (data?.modules) {
+        const mOpen = {};
+        const tOpen = {};
+        data.modules.forEach(m => {
+          mOpen[m.id] = true;
+          (m.topics || []).forEach(t => { tOpen[t.id] = true; });
+        });
+        setOpenModules(mOpen);
+        setOpenTopics(tOpen);
+      }
+    } catch (err) {
+      console.error("Failed to load course:", err);
+      toast.error("Failed to load course content. Please try again later.");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -43,11 +69,26 @@ export default function CourseView() {
     return () => supabase.removeChannel(channel);
   }, [id]);
 
-  if (!course) {
+  if (user?.role === "student" && (paymentStatus?.effective_tier === "expired" || user?.access_tier === "expired")) {
+    return <PaymentWall />;
+  }
+
+  if (loading && !course) {
     return (
       <div className="min-h-screen bg-white">
         <Navbar />
         <div className="max-w-4xl mx-auto py-16 px-6 text-sm text-slate-400">Loading…</div>
+      </div>
+    );
+  }
+
+  if (!course) {
+    return (
+      <div className="min-h-screen bg-white">
+        <Navbar />
+        <div className="max-w-4xl mx-auto py-16 px-6 text-sm text-slate-400 text-center">
+          Course not found or failed to load.
+        </div>
       </div>
     );
   }

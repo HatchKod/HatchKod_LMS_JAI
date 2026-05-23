@@ -32,7 +32,8 @@ import {
   Code2,
   Trophy,
   Image,
-  CreditCard
+  CreditCard,
+  Gift
 } from "lucide-react";
 import { toast } from "sonner";
 import NotificationBell from "./NotificationBell";
@@ -131,6 +132,19 @@ export default function Navbar({ unreadCount }) {
                 <HelpCircle className="h-4 w-4" />
                 Challenges
               </Link>
+              {user.role === "student" && (
+                <Link
+                  to="/referrals"
+                  className={`flex items-center gap-2 px-3 py-2 text-sm font-medium transition-colors rounded-md ${
+                    isActive("/referrals")
+                      ? "text-[#194BFB] bg-[#194BFB]/5"
+                      : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
+                  }`}
+                >
+                  <Gift className="h-4 w-4" />
+                  Refer & Earn
+                </Link>
+              )}
               {user.role === "admin" && (
                 <>
                   <Link
