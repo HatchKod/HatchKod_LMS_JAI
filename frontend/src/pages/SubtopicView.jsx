@@ -106,17 +106,20 @@ export default function SubtopicView() {
   useEffect(() => {
     load();
 
-    // Listen for real-time updates from admin
     const channel = supabase.channel(`subtopic_view_${id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'subtopics', filter: `id=eq.${id}` }, () => {
-        load();
-      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'subtopics', filter: `id=eq.${id}` }, () => load())
       .subscribe();
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => supabase.removeChannel(channel);
   }, [id]);
+
+  // Poll every 5s while submission is pending so the Next button unlocks
+  // the moment a mentor approves — no page reload needed.
+  useEffect(() => {
+    if (data?.submission?.status !== 'pending') return;
+    const interval = setInterval(load, 5000);
+    return () => clearInterval(interval);
+  }, [data?.submission?.status]);
 
   useEffect(() => {
     if (window.location.hash === "#task" && taskRef.current) {
