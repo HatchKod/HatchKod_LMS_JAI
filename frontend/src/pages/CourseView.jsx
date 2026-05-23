@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, Navigate } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import { api } from "../lib/api";
 import { Lock, CheckCircle2, Folder, ChevronDown, ChevronUp, Circle, ArrowLeft } from "lucide-react";
@@ -8,7 +8,6 @@ import { useAuth } from "../lib/auth";
 import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from "../components/ui/tooltip";
 import { toast } from "sonner";
 import { supabase } from "../lib/supabase";
-import PaymentWall from "../components/PaymentWall";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 export default function CourseView() {
@@ -71,7 +70,7 @@ export default function CourseView() {
   }, [id, queryClient]);
 
   if (user?.role === "student" && (paymentStatus?.effective_tier === "expired" || user?.access_tier === "expired")) {
-    return <PaymentWall />;
+    return <Navigate to="/billing" replace />;
   }
 
   if (loading && !course) {

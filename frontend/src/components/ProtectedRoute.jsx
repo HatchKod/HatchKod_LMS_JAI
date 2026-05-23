@@ -1,6 +1,5 @@
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "../lib/auth";
-import PaymentWall from "./PaymentWall";
 
 export function ProtectedRoute({ children, roles }) {
   const { user, loading } = useAuth();
@@ -22,7 +21,7 @@ export function ProtectedRoute({ children, roles }) {
   if (user.role === "student" && user.access_tier === "expired") {
     const allowedPaths = ["/dashboard", "/billing"];
     if (!allowedPaths.includes(location.pathname)) {
-      return <PaymentWall />;
+      return <Navigate to="/billing" replace />;
     }
   }
 

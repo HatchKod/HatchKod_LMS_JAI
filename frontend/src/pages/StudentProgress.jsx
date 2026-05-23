@@ -8,7 +8,6 @@ import {
   BookOpen, Clock, Layers, Calendar, Trophy,
   ArrowRight, Lock
 } from "lucide-react";
-import PaymentWall from "../components/PaymentWall";
 
 // Circular progress ring component
 function ProgressRing({ pct }) {
@@ -113,7 +112,8 @@ export default function StudentProgress() {
   useEffect(() => { fetchProgress(); }, [fetchProgress]);
 
   if (user?.role === "student" && (paymentStatus?.effective_tier === "expired" || user?.access_tier === "expired")) {
-    return <PaymentWall />;
+    navigate("/billing", { replace: true });
+    return null;
   }
 
   if (loading) {
