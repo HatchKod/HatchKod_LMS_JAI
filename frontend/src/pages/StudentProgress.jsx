@@ -6,17 +6,9 @@ import { useAuth } from "../lib/auth";
 import { toast } from "sonner";
 import {
   BookOpen, Clock, Layers, Calendar, Trophy,
-  ChevronDown, ChevronRight, CheckCircle, Circle,
-  PlayCircle, ArrowRight, Lock
+  ArrowRight, Lock
 } from "lucide-react";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../components/ui/tooltip";
 import PaymentWall from "../components/PaymentWall";
-
-// Helper: format date as "12 May"
-function fmtDate(iso) {
-  if (!iso) return "";
-  return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
-}
 
 // Circular progress ring component
 function ProgressRing({ pct }) {
@@ -47,19 +39,6 @@ function ProgressRing({ pct }) {
   );
 }
 
-function findNextIncomplete(modules) {
-  for (const mod of modules) {
-    for (const topic of mod.topics) {
-      for (const sub of (topic.subtopics || [])) {
-        if (!sub.is_completed) {
-          return { topic_id: sub.id, topic_title: sub.title, module_title: mod.title };
-        }
-      }
-    }
-  }
-  return null;
-}
-
 export default function StudentProgress() {
   const { user } = useAuth();
   const { studentId: paramStudentId } = useParams();
@@ -68,9 +47,12 @@ export default function StudentProgress() {
   const navigate = useNavigate();
   const [progressData, setProgressData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [expandedModules, setExpandedModules] = useState({});
-  const [expandedTopics, setExpandedTopics] = useState({});
   const [paymentStatus, setPaymentStatus] = useState(null);
+  // null = not yet fetched, [] = no batches / mentor view, [...] = loaded
+  const [enrolledBatches, setEnrolledBatches] = useState(null);
+  const [activeBatchId, setActiveBatchId] = useState(batchId || null);
+  // true once enrolled-batches is resolved (or not needed); gates fetchProgress
+  const [batchesLoaded, setBatchesLoaded] = useState(!!paramStudentId || !!batchId);
 
   useEffect(() => {
     if (user?.role !== "student" || paramStudentId) return;
@@ -86,127 +68,49 @@ export default function StudentProgress() {
     })();
   }, [user?.access_tier, user?.role, paramStudentId]);
 
+  // Fetch all courses the student is enrolled in (student's own progress page only)
+  useEffect(() => {
+    if (!user?.id) return;
+    if (user?.role !== "student" || paramStudentId) {
+      setEnrolledBatches([]);
+      return;
+    }
+    api.get("/students/me/enrolled-batches")
+      .then(({ data }) => {
+        setEnrolledBatches(data);
+        if (!activeBatchId && data.length > 0) {
+          setActiveBatchId(data[0].batch_id);
+        }
+        setBatchesLoaded(true);
+      })
+      .catch(() => {
+        setEnrolledBatches([]);
+        setBatchesLoaded(true);
+      });
+  }, [user?.id, user?.role, paramStudentId]);
+
   const fetchProgress = useCallback(async () => {
     const targetId = paramStudentId || user?.id;
     if (!targetId) return;
+    // For student's own view: wait until enrolled batches are resolved
+    if (user?.role === "student" && !paramStudentId && !batchesLoaded) return;
+
+    const effectiveBatchId = paramStudentId ? batchId : activeBatchId;
+    setLoading(true);
     try {
-      const url = batchId 
-        ? `/students/${targetId}/progress?batchId=${batchId}` 
+      const url = effectiveBatchId
+        ? `/students/${targetId}/progress?batchId=${effectiveBatchId}`
         : `/students/${targetId}/progress`;
       const { data } = await api.get(url);
       setProgressData(data);
-      // Auto-expand current module and topic
-      if (data.current_topic) {
-        let curMod = null;
-        let curTopic = null;
-        for (const m of data.modules) {
-          for (const t of m.topics) {
-            if (t.subtopics?.some(s => s.id === data.current_topic?.topic_id)) {
-              curMod = m;
-              curTopic = t;
-              break;
-            }
-          }
-          if (curMod) break;
-        }
-        if (curMod) {
-          setExpandedModules({ [curMod.id]: true });
-          if (curTopic) {
-            setExpandedTopics({ [curTopic.id]: true });
-          }
-        }
-      } else if (data.modules?.length) {
-        setExpandedModules({ [data.modules[0].id]: true });
-        if (data.modules[0].topics?.length) {
-          setExpandedTopics({ [data.modules[0].topics[0].id]: true });
-        }
-      }
     } catch {
       toast.error("Failed to load progress data");
     } finally {
       setLoading(false);
     }
-  }, [user?.id]);
+  }, [user?.id, user?.role, paramStudentId, batchId, activeBatchId, batchesLoaded]);
 
   useEffect(() => { fetchProgress(); }, [fetchProgress]);
-
-  const markComplete = async (subtopicId, moduleId) => {
-    // Optimistic update
-    setProgressData(prev => {
-      const updated = JSON.parse(JSON.stringify(prev));
-      const mod = updated.modules.find(m => m.id === moduleId);
-      if (!mod) return prev;
-      
-      let foundSubtopic = null;
-      for (const topic of mod.topics) {
-        const sub = topic.subtopics?.find(s => s.id === subtopicId);
-        if (sub) {
-          foundSubtopic = sub;
-          break;
-        }
-      }
-      
-      if (!foundSubtopic || foundSubtopic.is_completed) return prev;
-      foundSubtopic.is_completed = true;
-      foundSubtopic.completed_at = new Date().toISOString();
-      
-      mod.completed_topics += 1;
-      mod.completion_percentage = Math.round(mod.completed_topics / mod.total_topics * 100);
-      updated.completed_topics += 1;
-      updated.overall_percentage = Math.round(updated.completed_topics / updated.total_topics * 100);
-      updated.current_topic = findNextIncomplete(updated.modules);
-      return updated;
-    });
-    toast.success("Subtopic marked complete ✓");
-    try {
-      await api.post(`/subtopics/${subtopicId}/complete`, { time_spent_minutes: 0 });
-    } catch {
-      toast.error("Failed to save progress. Try again.");
-      fetchProgress();
-    }
-  };
-
-  const markIncomplete = async (subtopicId, moduleId) => {
-    setProgressData(prev => {
-      const updated = JSON.parse(JSON.stringify(prev));
-      const mod = updated.modules.find(m => m.id === moduleId);
-      if (!mod) return prev;
-      
-      let foundSubtopic = null;
-      for (const topic of mod.topics) {
-        const sub = topic.subtopics?.find(s => s.id === subtopicId);
-        if (sub) {
-          foundSubtopic = sub;
-          break;
-        }
-      }
-      
-      if (!foundSubtopic || !foundSubtopic.is_completed) return prev;
-      foundSubtopic.is_completed = false;
-      foundSubtopic.completed_at = null;
-      
-      mod.completed_topics = Math.max(0, mod.completed_topics - 1);
-      mod.completion_percentage = Math.round(mod.completed_topics / mod.total_topics * 100);
-      updated.completed_topics = Math.max(0, updated.completed_topics - 1);
-      updated.overall_percentage = Math.round(updated.completed_topics / updated.total_topics * 100);
-      updated.current_topic = findNextIncomplete(updated.modules);
-      return updated;
-    });
-    try {
-      await api.delete(`/subtopics/${subtopicId}/complete`);
-    } catch {
-      toast.error("Failed to undo. Try again.");
-      fetchProgress();
-    }
-  };
-
-  const toggleModule = (modId) => {
-    setExpandedModules(prev => ({ ...prev, [modId]: !prev[modId] }));
-  };
-
-  const toggleTopic = (topicId) => {
-    setExpandedTopics(prev => ({ ...prev, [topicId]: !prev[topicId] }));
-  };
 
   if (user?.role === "student" && (paymentStatus?.effective_tier === "expired" || user?.access_tier === "expired")) {
     return <PaymentWall />;
@@ -236,8 +140,10 @@ export default function StudentProgress() {
   }
 
   const {
-    course_title, batch_name, overall_percentage, total_topics,
-    completed_topics, total_subtopics, completed_subtopics, total_time_spent_minutes, current_topic, current_subtopic, modules
+    course_id, course_title, batch_name, overall_percentage, total_topics,
+    completed_topics, total_subtopics, completed_subtopics, total_time_spent_minutes,
+    completed_modules, total_modules, first_completed_at,
+    current_topic, current_subtopic,
   } = progressData;
 
   const displayCompleted = completed_topics ?? completed_subtopics ?? 0;
@@ -248,20 +154,41 @@ export default function StudentProgress() {
     module_title: current_subtopic.module_title
   } : null);
 
-  const completedModules = modules.filter(m => m.completion_percentage === 100).length;
   const totalHours = Math.floor(total_time_spent_minutes / 60);
   const totalMins = total_time_spent_minutes % 60;
-  const allCompletions = modules.flatMap(m => (m.topics || []).flatMap(t => (t.subtopics || []).filter(s => s.is_completed && s.completed_at)));
-  const firstCompletedAt = allCompletions.length
-    ? new Date(Math.min(...allCompletions.map(s => new Date(s.completed_at))))
-    : null;
-  const daysSince = firstCompletedAt
-    ? Math.max(1, Math.round((Date.now() - firstCompletedAt) / 86400000))
+  const daysSince = first_completed_at
+    ? Math.max(1, Math.round((Date.now() - new Date(first_completed_at)) / 86400000))
     : 0;
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] font-['IBM_Plex_Sans']">
       <Navbar />
+
+      {/* Course Switcher — shown when student is enrolled in multiple courses */}
+      {!paramStudentId && enrolledBatches && enrolledBatches.length > 1 && (
+        <div className="bg-white border-b border-slate-200 px-6 py-0">
+          <div className="max-w-5xl mx-auto flex items-center gap-1 overflow-x-auto">
+            {enrolledBatches.map((b) => (
+              <button
+                key={b.batch_id}
+                onClick={() => {
+                  if (b.batch_id !== activeBatchId) {
+                    setActiveBatchId(b.batch_id);
+                    setProgressData(null);
+                  }
+                }}
+                className={`shrink-0 px-5 py-3 text-xs font-bold border-b-2 transition-colors whitespace-nowrap ${
+                  b.batch_id === activeBatchId
+                    ? "border-[#194BFB] text-[#194BFB]"
+                    : "border-transparent text-slate-500 hover:text-slate-800"
+                }`}
+              >
+                {b.course_title}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Hero Section */}
       <div className="bg-white border-b border-slate-200 px-6 py-6">
@@ -309,17 +236,7 @@ export default function StudentProgress() {
                   {paramStudentId ? "Current Incomplete Topic" : "Continue where you left off"}
                 </p>
                 {displayCurrentTopic ? (() => {
-                  // Check if the current subtopic's module is tier-locked or lacks batch access
-                  const currentModuleName = displayCurrentTopic.module_title;
-                  const currentModule = modules.find(m => m.title === currentModuleName);
-                  let isCurrentLocked = currentModule?.tier_locked === true;
-
-                  if (!isCurrentLocked && current_subtopic?.subtopic_id) {
-                    const foundSubtopic = currentModule?.topics?.flatMap(t => t.subtopics)?.find(s => s.id === current_subtopic.subtopic_id);
-                    if (foundSubtopic && foundSubtopic.unlocked === false) {
-                      isCurrentLocked = true;
-                    }
-                  }
+                  const isCurrentLocked = current_subtopic?.tier_locked === true;
 
                   return isCurrentLocked ? (
                     <div className="bg-slate-50 border border-slate-200 rounded-sm p-3 flex items-center gap-3">
@@ -384,7 +301,7 @@ export default function StudentProgress() {
             </div>
             <div className="flex items-center gap-2 text-sm text-slate-600">
               <Layers className="w-4 h-4 text-slate-400" />
-              <span><strong className="text-slate-800">{completedModules}/{modules.length}</strong> Modules Done</span>
+              <span><strong className="text-slate-800">{completed_modules}/{total_modules}</strong> Modules Done</span>
             </div>
             {daysSince > 0 && (
               <div className="flex items-center gap-2 text-sm text-slate-600">
@@ -393,179 +310,19 @@ export default function StudentProgress() {
               </div>
             )}
           </div>
-        </div>
-      </div>
 
-      {/* Module Accordion */}
-      <div className="max-w-5xl mx-auto px-6 py-6">
-        <p className="text-[10px] uppercase tracking-wider text-slate-400 mb-4">Course Content</p>
-
-        <div className="bg-white border border-slate-200 rounded-lg overflow-hidden divide-y divide-slate-100 shadow-sm">
-          {modules.map((mod) => {
-            const isExpanded = !!expandedModules[mod.id];
-            const isDone = mod.completion_percentage === 100;
-            const barColor = isDone ? "bg-green-500" : mod.completion_percentage > 0 ? "bg-[#194BFB]" : "bg-slate-200";
-            const modCompleted = mod.completed_topics ?? mod.completed_subtopics ?? 0;
-            const modTotal = mod.total_topics ?? mod.total_subtopics ?? 0;
-
-            return (
-              <div key={mod.id}>
-                {/* Module Header */}
-                <button
-                  onClick={() => toggleModule(mod.id)}
-                  className="w-full flex items-center gap-3 py-4 px-5 cursor-pointer bg-white hover:bg-slate-50 transition-colors text-left"
-                >
-                  {isExpanded
-                    ? <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" />
-                    : <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
-                  }
-                  <span className="text-sm font-extrabold text-slate-800">{mod.title}</span>
-                  <span className="text-xs text-slate-400 ml-1 font-semibold">{modCompleted}/{modTotal}</span>
-                  <div className="ml-auto flex items-center gap-3">
-                    <div className="w-24 h-1.5 rounded-full bg-slate-100 overflow-hidden">
-                      <div
-                        className={`h-full rounded-full ${barColor} transition-all`}
-                        style={{ width: `${mod.completion_percentage}%` }}
-                      />
-                    </div>
-                    {isDone && <CheckCircle className="text-green-500 w-4 h-4 shrink-0" />}
-                  </div>
-                </button>
-
-                {/* Topics */}
-                {isExpanded && (
-                  <div className="divide-y divide-slate-100 bg-slate-50/30">
-                    {(mod.topics || []).map((topic) => {
-                      const isTopicExpanded = !!expandedTopics[topic.id];
-                      const totalSub = topic.subtopics?.length || 0;
-                      const doneSub = topic.subtopics?.filter(s => s.is_completed).length || 0;
-                      const isTopicDone = totalSub > 0 && doneSub === totalSub;
-
-                      return (
-                        <div key={topic.id} className="border-b last:border-b-0 border-slate-100">
-                          {/* Topic Row */}
-                          <button
-                            onClick={() => toggleTopic(topic.id)}
-                            className="w-full flex items-center gap-3 py-3 pl-8 pr-5 hover:bg-slate-100/50 transition-colors text-left"
-                          >
-                            {isTopicExpanded
-                              ? <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                              : <ChevronRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                            }
-                            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest bg-slate-100 px-1.5 py-0.5 rounded shrink-0">Topic</span>
-                            <span className={`text-sm font-semibold flex-1 ${isTopicDone ? "text-slate-500" : "text-slate-700"}`}>
-                              {topic.title}
-                            </span>
-                            <span className="text-xs text-slate-400 font-medium">
-                              {doneSub}/{totalSub} Done
-                            </span>
-                            {isTopicDone && <CheckCircle className="text-green-500 w-3.5 h-3.5 shrink-0" />}
-                          </button>
-
-                          {/* Subtopics */}
-                          {isTopicExpanded && (
-                            <div className="divide-y divide-slate-50 bg-white">
-                              {(topic.subtopics || []).map((s) => {
-                                const isCurrent = current_topic?.topic_id === s.id;
-                                const isModLocked = mod.tier_locked && !s.is_completed;
-
-                                if (isModLocked) {
-                                  return (
-                                    <TooltipProvider key={s.id}>
-                                      <Tooltip>
-                                        <TooltipTrigger asChild>
-                                          <div
-                                            className="flex items-center gap-3 py-3 pl-14 pr-5 opacity-50 cursor-not-allowed bg-slate-50/50 group"
-                                          >
-                                            <Lock className="text-slate-400 w-4 h-4 shrink-0" />
-                                            <span className="text-sm truncate flex-1 text-slate-400">{s.title}</span>
-                                            <span className="ml-auto text-[10px] text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded font-semibold uppercase tracking-wider">Locked</span>
-                                          </div>
-                                        </TooltipTrigger>
-                                        <TooltipContent side="right" className="bg-slate-800 text-white border-none rounded-md p-3 shadow-xl max-w-[200px]">
-                                          <div className="text-[10px] font-black tracking-[0.2em] uppercase opacity-70 mb-1">Tier Locked</div>
-                                          <div className="text-[11px] font-medium">Upgrade your plan to access this module.</div>
-                                        </TooltipContent>
-                                      </Tooltip>
-                                    </TooltipProvider>
-                                  );
-                                }
-
-                                return (
-                                  <div
-                                    key={s.id}
-                                    className="flex items-center gap-3 py-3 pl-14 pr-5 hover:bg-slate-50 cursor-pointer group"
-                                    onClick={() => !paramStudentId && navigate(`/subtopic/${s.id}`)}
-                                  >
-                                    {/* Status icon */}
-                                    {s.is_completed
-                                      ? <CheckCircle className="text-green-500 w-4 h-4 shrink-0" />
-                                      : isCurrent
-                                        ? <PlayCircle className="text-[#194BFB] w-4 h-4 shrink-0 animate-pulse" />
-                                        : <Circle className="text-slate-300 w-4 h-4 shrink-0" />
-                                    }
-
-                                    {/* Title */}
-                                    <span className={`text-sm truncate flex-1 ${
-                                      s.is_completed ? "text-slate-500"
-                                        : isCurrent ? "text-[#194BFB] font-medium"
-                                        : "text-slate-700"
-                                    }`}>
-                                      {s.title}
-                                    </span>
-
-                                    {/* Right side Actions */}
-                                    <div
-                                      className="ml-auto flex items-center gap-2"
-                                      onClick={e => e.stopPropagation()}
-                                    >
-                                      {s.is_completed && (
-                                        <>
-                                          <span className="text-xs text-slate-400 font-medium">{fmtDate(s.completed_at)}</span>
-                                          {s.time_spent_minutes > 0 && (
-                                            <span className="text-xs text-slate-400 bg-slate-100 px-1 py-0.5 rounded font-mono">{s.time_spent_minutes}m</span>
-                                          )}
-                                          {!paramStudentId && (
-                                            <button
-                                              onClick={() => markIncomplete(s.id, mod.id)}
-                                              className="text-xs text-slate-400 hover:text-red-500 font-semibold transition-colors ml-1"
-                                            >
-                                              Undo
-                                            </button>
-                                          )}
-                                        </>
-                                      )}
-                                      {!s.is_completed && isCurrent && !paramStudentId && (
-                                        <span className="bg-blue-100 text-blue-600 text-xs px-2 py-0.5 rounded-sm font-semibold">Continue</span>
-                                      )}
-                                      {!s.is_completed && !paramStudentId && (
-                                        <button
-                                          onClick={() => markComplete(s.id, mod.id)}
-                                          className="text-xs text-slate-400 hover:text-green-600 font-semibold transition-colors"
-                                        >
-                                          Mark done
-                                        </button>
-                                      )}
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                              {(topic.subtopics || []).length === 0 && (
-                                <div className="py-2.5 pl-14 text-xs text-slate-400 font-medium">No subtopics available.</div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                    {(mod.topics || []).length === 0 && (
-                      <div className="py-3 pl-8 text-xs text-slate-400 font-medium">No topics available in this module.</div>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+          {/* CTA — navigate to course syllabus */}
+          {!paramStudentId && course_id && (
+            <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between gap-4">
+              <p className="text-xs text-slate-400">View the full module and topic breakdown for this course.</p>
+              <Link
+                to={`/course/${course_id}`}
+                className="inline-flex items-center gap-2 bg-[#194BFB] hover:bg-[#0F3AE5] text-white text-xs font-bold px-4 py-2 rounded-sm transition-colors shrink-0"
+              >
+                View Full Syllabus <ArrowRight className="w-3.5 h-3.5" />
+              </Link>
+            </div>
+          )}
         </div>
       </div>
     </div>

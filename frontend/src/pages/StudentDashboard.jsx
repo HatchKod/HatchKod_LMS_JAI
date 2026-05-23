@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import { api } from "../lib/api";
@@ -20,11 +20,11 @@ export default function StudentDashboard() {
   const [activeTab, setActiveTab] = useState("inprogress");
 
   // Dashboard Data Query
-  const { 
-    data, 
-    isLoading: isDashboardLoading, 
+  const {
+    data,
+    isLoading: isDashboardLoading,
     error: dashboardError,
-    refetch: refetchDashboard
+    refetch: refetchDashboard,
   } = useQuery({
     queryKey: ["dashboard", "student", user?.id],
     queryFn: async () => {
@@ -163,6 +163,7 @@ export default function StudentDashboard() {
           <TodaysClasses />
         </div>
 
+        {/* CONTINUE LEARNING BLOCK — temporarily commented out
         {data.next_topic && activeTab === "inprogress" && (() => {
           const pending = (data.pending_submissions || []).find(s => s.topic_id === data.next_topic.topic.id);
           const nextSubtopicId = data.next_topic.subtopic?.id;
@@ -230,7 +231,7 @@ export default function StudentDashboard() {
               </Card>
             </div>
           );
-        })()}
+        })()} */}
 
         <div id="courses-section" className="flex items-center justify-between mb-6">
           <h2 className="text-xl font-bold tracking-tight text-slate-900">
