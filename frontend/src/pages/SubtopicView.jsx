@@ -8,7 +8,7 @@ import { Textarea } from "../components/ui/textarea";
 import { Label } from "../components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "../components/ui/dialog";
 import { Badge } from "../components/ui/badge";
-import { BookOpen, Video, ArrowLeft, ArrowRight, Github, FileUp, Link2, ChevronLeft, ChevronRight, ClipboardCheck, FileText, Clock, Trash2, Edit3, RefreshCcw, Check, Lock, CheckCircle } from "lucide-react";
+import { BookOpen, Video, ArrowLeft, ArrowRight, Github, FileUp, Link2, ChevronLeft, ChevronRight, ClipboardCheck, FileText, Clock, Trash2, Edit3, RefreshCcw, Check, Lock, CheckCircle, Play, Terminal, CheckCircle2, XCircle, Loader2 } from "lucide-react";
 import StatusPill from "../components/StatusPill";
 import { toast } from "sonner";
 import { useAuth } from "../lib/auth";
@@ -18,6 +18,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../com
 import Navbar from "../components/Navbar";
 import Breadcrumbs from "../components/Breadcrumbs";
 import ReactMarkdown from "react-markdown";
+import Editor from "@monaco-editor/react";
 
 export default function SubtopicView() {
   const { id } = useParams();
@@ -42,6 +43,14 @@ export default function SubtopicView() {
   const [isSyllabusOpen, setIsSyllabusOpen] = useState(false);
   const startTimeRef = useRef(Date.now());
 
+  // Coding task state
+  const [code, setCode] = useState("");
+  const [codeRunning, setCodeRunning] = useState(false);
+  const [codeResults, setCodeResults] = useState(null); // { status, all_passed, test_results }
+  const [stdin, setStdin] = useState("");
+  const [runOutput, setRunOutput] = useState(null); // { output, cpuTime, memory }
+  const [runBusy, setRunBusy] = useState(false);
+
   const load = async () => {
     setError("");
     try {
@@ -64,6 +73,15 @@ export default function SubtopicView() {
         setUrl("");
         setText("");
         setSubmissionType("link");
+      }
+      // Restore last code for coding tasks
+      if (res.data.last_code_submission?.code) {
+        setCode(res.data.last_code_submission.code);
+        setCodeResults({
+          status: res.data.last_code_submission.status,
+          all_passed: res.data.last_code_submission.status === "accepted",
+          test_results: res.data.last_code_submission.test_results || [],
+        });
       }
     } catch (e) {
       const detail = e.response?.data?.detail;
@@ -233,6 +251,63 @@ export default function SubtopicView() {
       load();
     } catch {
       toast.error("Failed to undo completion");
+    }
+  };
+
+  const runCode = async () => {
+    if (!code.trim()) { toast.error("Write some code first"); return; }
+    setRunBusy(true);
+    setRunOutput(null);
+    try {
+      const res = await api.post("/execute", {
+        code,
+        stdin,
+        language: data?.task?.language || "java",
+      });
+      setRunOutput(res.data);
+    } catch (e) {
+      toast.error(formatApiError(e.response?.data?.detail) || "Execution failed");
+    } finally {
+      setRunBusy(false);
+    }
+  };
+
+  const submitCode = async () => {
+    if (!code.trim()) { toast.error("Write some code first"); return; }
+    setCodeRunning(true);
+    setCodeResults(null);
+    try {
+      const res = await api.post(`/subtopics/${id}/submit-code`, {
+        code,
+        language: data?.task?.language || "java",
+      });
+      setCodeResults(res.data);
+      if (res.data.all_passed) {
+        setIsCompleted(true);
+        setCompletedAt(new Date().toISOString());
+        if (res.data.gamification) {
+          toast.success(`All tests passed! +${res.data.gamification.xp_earned} XP earned! 🔥`, {
+            description: `Level ${res.data.gamification.level} · ${res.data.gamification.streak} day streak`,
+          });
+        } else {
+          toast.success("All tests passed! Moving to next topic 🚀");
+        }
+        setTimeout(() => {
+          if (data?.next_subtopic) {
+            navigate(`/subtopic/${data.next_subtopic.id}`);
+          } else {
+            navigate("/progress");
+          }
+        }, 1800);
+      } else {
+        const failed = res.data.test_results?.filter(t => !t.passed).length || 0;
+        const total = res.data.test_results?.length || 0;
+        toast.error(`${failed}/${total} test case${failed !== 1 ? "s" : ""} failed. Keep trying!`);
+      }
+    } catch (e) {
+      toast.error(formatApiError(e.response?.data?.detail) || "Execution failed");
+    } finally {
+      setCodeRunning(false);
     }
   };
 
@@ -597,93 +672,286 @@ export default function SubtopicView() {
 
                 {/* Submission Area */}
                 <div className="pt-6 border-t border-slate-100">
-                  <h4 className="text-[10px] uppercase font-bold text-slate-400 tracking-widest mb-6">Your Submission</h4>
 
-                  {submission && !isEditingState ? (
-                    <div className="bg-slate-50 border border-slate-200 p-6 rounded-sm space-y-4">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-4">
-                          <div className="h-10 w-10 bg-white border border-slate-200 rounded-sm flex items-center justify-center">
-                            {submission.type === "file" ? <FileUp className="h-5 w-5 text-[#194BFB]" /> : <Link2 className="h-5 w-5 text-[#194BFB]" />}
-                          </div>
-                          <div>
-                            <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Submitted {submission.type === 'file' ? 'File' : 'Link'}</div>
-                            <a href={submission.submission_url} target="_blank" rel="noreferrer" className="text-sm font-bold text-[#194BFB] hover:underline flex items-center gap-1">
-                              {submission.submission_url?.slice(0, 50) || "View Submission"}...
-                            </a>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {(submission.status === "pending" || submission.status === "rework") && (
-                            <>
-                              <Button variant="ghost" size="sm" onClick={() => setIsEditingState(true)} className="h-8 text-slate-600 hover:text-[#194BFB] hover:bg-[#194BFB]/5">
-                                <Edit3 className="h-3.5 w-3.5 mr-2" /> Edit
-                              </Button>
-                              <Button variant="ghost" size="sm" onClick={handleDelete} className="h-8 text-red-500 hover:text-red-600 hover:bg-red-50">
-                                <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete
-                              </Button>
-                            </>
-                          )}
-                        </div>
-                      </div>
-
-                      {submission.mentor_feedback && (
-                        <div className="mt-4 p-4 bg-orange-50/50 border border-orange-100 rounded-sm">
-                          <div className="text-[10px] uppercase font-bold text-orange-600 tracking-wider mb-2">Mentor Feedback</div>
-                          <p className="text-sm text-orange-800 leading-relaxed italic">"{submission.mentor_feedback}"</p>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
+                  {task.task_type === "coding" ? (
+                    /* ── CODING TASK: Monaco editor + Judge0 auto-grading ── */
                     isStudent && (
-                      <form onSubmit={submit} className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                        <div className="flex gap-4">
-                          <button type="button" onClick={() => { setSubmissionType("link"); setSubmissionError(""); }} className={`flex-1 p-4 rounded-sm border transition-all text-left ${submissionType === "link" ? "border-[#194BFB] bg-[#194BFB]/5 ring-1 ring-[#194BFB]" : "border-slate-200 hover:border-slate-300 bg-white"}`}>
-                            <div className={`h-8 w-8 rounded-full flex items-center justify-center mb-3 ${submissionType === "link" ? "bg-[#194BFB] text-white" : "bg-slate-100 text-slate-400"}`}>
-                              <Link2 className="h-4 w-4" />
+                      <div className="space-y-4 animate-in fade-in duration-300">
+                        {/* Sample test cases */}
+                        {task.sample_test_cases?.length > 0 && (
+                          <div>
+                            <h4 className="text-[10px] uppercase font-bold text-slate-400 tracking-widest mb-3">Sample Test Cases</h4>
+                            <div className="space-y-2">
+                              {task.sample_test_cases.map((tc, i) => (
+                                <div key={tc.id} className="grid grid-cols-2 gap-2 text-xs font-mono">
+                                  <div>
+                                    <div className="text-[9px] uppercase font-bold text-slate-400 mb-1">Input {i + 1}</div>
+                                    <pre className="bg-slate-900 text-slate-100 p-3 rounded-sm overflow-x-auto">{tc.input || "(empty)"}</pre>
+                                  </div>
+                                  <div>
+                                    <div className="text-[9px] uppercase font-bold text-slate-400 mb-1">Expected Output {i + 1}</div>
+                                    <pre className="bg-slate-900 text-emerald-400 p-3 rounded-sm overflow-x-auto">{tc.expected_output}</pre>
+                                  </div>
+                                </div>
+                              ))}
                             </div>
-                            <div className="font-bold text-sm">Submission Link</div>
-                            <div className="text-[10px] text-slate-500 uppercase tracking-wider mt-1">GitHub or URL</div>
-                          </button>
-                          <button type="button" onClick={() => { setSubmissionType("file"); setSubmissionError(""); }} className={`flex-1 p-4 rounded-sm border transition-all text-left ${submissionType === "file" ? "border-[#194BFB] bg-[#194BFB]/5 ring-1 ring-[#194BFB]" : "border-slate-200 hover:border-slate-300 bg-white"}`}>
-                            <div className={`h-8 w-8 rounded-full flex items-center justify-center mb-3 ${submissionType === "file" ? "bg-[#194BFB] text-white" : "bg-slate-100 text-slate-400"}`}>
-                              <FileUp className="h-4 w-4" />
-                            </div>
-                            <div className="font-bold text-sm">Upload File</div>
-                            <div className="text-[10px] text-slate-500 uppercase tracking-wider mt-1">ZIP or PDF</div>
-                          </button>
-                        </div>
-
-                        {submissionType === "link" ? (
-                          <div className="space-y-2">
-                            <Label className="text-[10px] uppercase font-bold text-slate-400 tracking-widest">Resource URL</Label>
-                            <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://github.com/your-project" className="rounded-sm border-slate-200 focus:ring-[#194BFB] h-11" />
-                          </div>
-                        ) : (
-                          <div className="space-y-2">
-                            <Label className="text-[10px] uppercase font-bold text-slate-400 tracking-widest">Choose File</Label>
-                            <Input type="file" onChange={handleFileChange} className="rounded-sm border-slate-200 h-11 py-2 cursor-pointer" />
                           </div>
                         )}
 
-                        <div className="space-y-2">
-                          <Label className="text-[10px] uppercase font-bold text-slate-400 tracking-widest">Comments (Optional)</Label>
-                          <Textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="Anything you want the mentor to know..." className="rounded-sm border-slate-200 min-h-[100px] focus:ring-[#194BFB]" />
+                        {/* Editor */}
+                        <div>
+                          <div className="flex items-center justify-between mb-2">
+                            <h4 className="text-[10px] uppercase font-bold text-slate-400 tracking-widest flex items-center gap-2">
+                              <Terminal className="h-3 w-3" /> Your Code
+                            </h4>
+                            <span className="text-[10px] font-bold text-slate-400 uppercase bg-slate-100 px-2 py-0.5 rounded">
+                              {task.language || "java"}
+                            </span>
+                          </div>
+                          <div className="border border-slate-200 rounded-sm overflow-hidden">
+                            <Editor
+                              height="380px"
+                              language={task.language === "cpp" ? "cpp" : task.language === "javascript" ? "javascript" : task.language === "python" ? "python" : "java"}
+                              value={code}
+                              onChange={(val) => setCode(val || "")}
+                              theme="vs-dark"
+                              options={{
+                                minimap: { enabled: false },
+                                fontSize: 14,
+                                lineNumbers: "on",
+                                scrollBeyondLastLine: false,
+                                automaticLayout: true,
+                                tabSize: 4,
+                              }}
+                            />
+                          </div>
                         </div>
 
-                        <div className="flex items-center gap-3 pt-2">
-                          <Button type="submit" disabled={busy} className="flex-1 rounded-sm bg-[#194BFB] hover:bg-[#0F3AE5] h-11 font-bold uppercase tracking-widest">
-                            {busy ? "Submitting..." : (submission ? "Save & Resubmit" : "Submit Assignment")}
-                          </Button>
-                          {isEditingState && (
-                            <Button variant="ghost" onClick={() => setIsEditingState(false)} className="rounded-sm h-11 font-bold text-slate-500">
-                              Cancel
+                        {/* Stdin + Output panels */}
+                        <div className="rounded-sm overflow-hidden border border-slate-800 bg-slate-900">
+                          <div className="grid grid-cols-2 divide-x divide-slate-700">
+                            {/* Left: stdin */}
+                            <div className="flex flex-col">
+                              <div className="px-3 py-2 bg-slate-800 flex items-center gap-2 border-b border-slate-700">
+                                <Terminal className="h-3 w-3 text-slate-400" />
+                                <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Input (stdin)</span>
+                              </div>
+                              <textarea
+                                className="w-full h-28 bg-transparent p-3 text-sm font-mono text-slate-300 outline-none resize-none placeholder-slate-600"
+                                placeholder={"Enter input values here...\n(leave empty if no stdin)"}
+                                value={stdin}
+                                onChange={(e) => setStdin(e.target.value)}
+                                disabled={runBusy}
+                              />
+                            </div>
+                            {/* Right: output */}
+                            <div className="flex flex-col">
+                              <div className="px-3 py-2 bg-slate-800 flex items-center gap-2 border-b border-slate-700">
+                                <Play className="h-3 w-3 text-slate-400" />
+                                <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Output</span>
+                                {runOutput && (
+                                  <span className="ml-auto text-[9px] font-bold text-slate-500 uppercase">
+                                    {runOutput.cpuTime}s · {runOutput.memory} KB
+                                  </span>
+                                )}
+                              </div>
+                              <div className="h-28 p-3 overflow-y-auto">
+                                {runBusy ? (
+                                  <div className="flex items-center gap-2 text-blue-400 text-xs animate-pulse">
+                                    <Loader2 className="h-3 w-3 animate-spin" /> Compiling &amp; running...
+                                  </div>
+                                ) : runOutput ? (
+                                  <pre className={`text-xs font-mono whitespace-pre-wrap ${/error|exception/i.test(runOutput.output || "") ? "text-red-400" : "text-emerald-400"}`}>
+                                    {runOutput.output || <span className="text-slate-500 italic">No output</span>}
+                                  </pre>
+                                ) : (
+                                  <span className="text-slate-600 text-xs italic">Output will appear here after running</span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                          {/* Run Code button */}
+                          <div className="border-t border-slate-700 p-2">
+                            <Button
+                              onClick={runCode}
+                              disabled={runBusy || codeRunning}
+                              className="w-full h-9 rounded-sm font-bold uppercase tracking-widest bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs"
+                            >
+                              {runBusy ? (
+                                <><Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" /> Running...</>
+                              ) : (
+                                <><Play className="h-3.5 w-3.5 mr-2 fill-current" /> Run Code</>
+                              )}
                             </Button>
+                          </div>
+                        </div>
+
+                        {/* Divider */}
+                        <div className="flex items-center gap-3">
+                          <div className="flex-1 h-px bg-slate-100" />
+                          <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Submit against test cases</span>
+                          <div className="flex-1 h-px bg-slate-100" />
+                        </div>
+
+                        {/* Run & Submit button */}
+                        <Button
+                          onClick={submitCode}
+                          disabled={codeRunning || isCompleted}
+                          className="w-full h-11 rounded-sm font-bold uppercase tracking-widest bg-[#194BFB] hover:bg-[#0F3AE5] text-white shadow-lg shadow-blue-100"
+                        >
+                          {codeRunning ? (
+                            <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Running Tests...</>
+                          ) : isCompleted ? (
+                            <><CheckCircle2 className="h-4 w-4 mr-2" /> All Tests Passed</>
+                          ) : (
+                            <><Play className="h-4 w-4 mr-2" /> Run &amp; Submit</>
+                          )}
+                        </Button>
+
+                        {/* Test results */}
+                        {codeResults && (
+                          <div className="space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                            <div className={`flex items-center gap-2 px-4 py-3 rounded-sm font-bold text-sm ${
+                              codeResults.all_passed
+                                ? "bg-emerald-50 border border-emerald-200 text-emerald-700"
+                                : codeResults.status === "compilation_error"
+                                  ? "bg-red-50 border border-red-200 text-red-700"
+                                  : "bg-amber-50 border border-amber-200 text-amber-700"
+                            }`}>
+                              {codeResults.all_passed
+                                ? <><CheckCircle2 className="h-4 w-4" /> All test cases passed!</>
+                                : codeResults.status === "compilation_error"
+                                  ? <><XCircle className="h-4 w-4" /> Compilation Error</>
+                                  : <><XCircle className="h-4 w-4" /> {codeResults.test_results?.filter(t => t.passed).length || 0} / {codeResults.test_results?.length || 0} test cases passed</>
+                              }
+                            </div>
+                            {codeResults.test_results?.map((tr, i) => (
+                              <div key={tr.test_case_id || i} className={`p-3 rounded-sm border text-xs font-mono ${tr.passed ? "bg-emerald-50 border-emerald-100" : "bg-red-50 border-red-100"}`}>
+                                <div className="flex items-center gap-2 font-bold mb-2">
+                                  {tr.passed
+                                    ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+                                    : <XCircle className="h-3.5 w-3.5 text-red-500" />
+                                  }
+                                  <span className={tr.passed ? "text-emerald-700" : "text-red-700"}>
+                                    Test {i + 1} {tr.is_sample ? "(Sample)" : "(Hidden)"} — {tr.passed ? "Passed" : "Failed"}
+                                  </span>
+                                </div>
+                                {!tr.passed && tr.is_sample && (
+                                  <div className="grid grid-cols-2 gap-2 mt-2">
+                                    {tr.input !== undefined && (
+                                      <div>
+                                        <div className="text-[9px] text-slate-500 mb-1">Input</div>
+                                        <pre className="bg-white border border-slate-200 p-2 rounded text-slate-700 overflow-x-auto">{tr.input || "(empty)"}</pre>
+                                      </div>
+                                    )}
+                                    {tr.expected_output !== undefined && (
+                                      <div>
+                                        <div className="text-[9px] text-slate-500 mb-1">Expected</div>
+                                        <pre className="bg-white border border-slate-200 p-2 rounded text-emerald-700 overflow-x-auto">{tr.expected_output}</pre>
+                                      </div>
+                                    )}
+                                    <div className="col-span-2">
+                                      <div className="text-[9px] text-slate-500 mb-1">Your Output</div>
+                                      <pre className="bg-white border border-red-200 p-2 rounded text-red-700 overflow-x-auto">{tr.actual_output || "(no output)"}</pre>
+                                    </div>
+                                  </div>
+                                )}
+                                {!tr.passed && !tr.is_sample && (
+                                  <div className="mt-1 text-slate-500 text-[10px]">Hidden test case — output not shown.</div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  ) : (
+                    /* ── PROJECT TASK: existing GitHub URL / file upload flow ── */
+                    <>
+                      <h4 className="text-[10px] uppercase font-bold text-slate-400 tracking-widest mb-6">Your Submission</h4>
+                      {submission && !isEditingState ? (
+                        <div className="bg-slate-50 border border-slate-200 p-6 rounded-sm space-y-4">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-4">
+                              <div className="h-10 w-10 bg-white border border-slate-200 rounded-sm flex items-center justify-center">
+                                {submission.type === "file" ? <FileUp className="h-5 w-5 text-[#194BFB]" /> : <Link2 className="h-5 w-5 text-[#194BFB]" />}
+                              </div>
+                              <div>
+                                <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Submitted {submission.type === 'file' ? 'File' : 'Link'}</div>
+                                <a href={submission.submission_url} target="_blank" rel="noreferrer" className="text-sm font-bold text-[#194BFB] hover:underline flex items-center gap-1">
+                                  {submission.submission_url?.slice(0, 50) || "View Submission"}...
+                                </a>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {(submission.status === "pending" || submission.status === "rework") && (
+                                <>
+                                  <Button variant="ghost" size="sm" onClick={() => setIsEditingState(true)} className="h-8 text-slate-600 hover:text-[#194BFB] hover:bg-[#194BFB]/5">
+                                    <Edit3 className="h-3.5 w-3.5 mr-2" /> Edit
+                                  </Button>
+                                  <Button variant="ghost" size="sm" onClick={handleDelete} className="h-8 text-red-500 hover:text-red-600 hover:bg-red-50">
+                                    <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete
+                                  </Button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                          {submission.mentor_feedback && (
+                            <div className="mt-4 p-4 bg-orange-50/50 border border-orange-100 rounded-sm">
+                              <div className="text-[10px] uppercase font-bold text-orange-600 tracking-wider mb-2">Mentor Feedback</div>
+                              <p className="text-sm text-orange-800 leading-relaxed italic">"{submission.mentor_feedback}"</p>
+                            </div>
                           )}
                         </div>
-                        {submissionError && <div className="text-xs text-red-500 font-medium text-center">{submissionError}</div>}
-                      </form>
-                    )
+                      ) : (
+                        isStudent && (
+                          <form onSubmit={submit} className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                            <div className="flex gap-4">
+                              <button type="button" onClick={() => { setSubmissionType("link"); setSubmissionError(""); }} className={`flex-1 p-4 rounded-sm border transition-all text-left ${submissionType === "link" ? "border-[#194BFB] bg-[#194BFB]/5 ring-1 ring-[#194BFB]" : "border-slate-200 hover:border-slate-300 bg-white"}`}>
+                                <div className={`h-8 w-8 rounded-full flex items-center justify-center mb-3 ${submissionType === "link" ? "bg-[#194BFB] text-white" : "bg-slate-100 text-slate-400"}`}>
+                                  <Link2 className="h-4 w-4" />
+                                </div>
+                                <div className="font-bold text-sm">Submission Link</div>
+                                <div className="text-[10px] text-slate-500 uppercase tracking-wider mt-1">GitHub or URL</div>
+                              </button>
+                              <button type="button" onClick={() => { setSubmissionType("file"); setSubmissionError(""); }} className={`flex-1 p-4 rounded-sm border transition-all text-left ${submissionType === "file" ? "border-[#194BFB] bg-[#194BFB]/5 ring-1 ring-[#194BFB]" : "border-slate-200 hover:border-slate-300 bg-white"}`}>
+                                <div className={`h-8 w-8 rounded-full flex items-center justify-center mb-3 ${submissionType === "file" ? "bg-[#194BFB] text-white" : "bg-slate-100 text-slate-400"}`}>
+                                  <FileUp className="h-4 w-4" />
+                                </div>
+                                <div className="font-bold text-sm">Upload File</div>
+                                <div className="text-[10px] text-slate-500 uppercase tracking-wider mt-1">ZIP or PDF</div>
+                              </button>
+                            </div>
+                            {submissionType === "link" ? (
+                              <div className="space-y-2">
+                                <Label className="text-[10px] uppercase font-bold text-slate-400 tracking-widest">Resource URL</Label>
+                                <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://github.com/your-project" className="rounded-sm border-slate-200 focus:ring-[#194BFB] h-11" />
+                              </div>
+                            ) : (
+                              <div className="space-y-2">
+                                <Label className="text-[10px] uppercase font-bold text-slate-400 tracking-widest">Choose File</Label>
+                                <Input type="file" onChange={handleFileChange} className="rounded-sm border-slate-200 h-11 py-2 cursor-pointer" />
+                              </div>
+                            )}
+                            <div className="space-y-2">
+                              <Label className="text-[10px] uppercase font-bold text-slate-400 tracking-widest">Comments (Optional)</Label>
+                              <Textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="Anything you want the mentor to know..." className="rounded-sm border-slate-200 min-h-[100px] focus:ring-[#194BFB]" />
+                            </div>
+                            <div className="flex items-center gap-3 pt-2">
+                              <Button type="submit" disabled={busy} className="flex-1 rounded-sm bg-[#194BFB] hover:bg-[#0F3AE5] h-11 font-bold uppercase tracking-widest">
+                                {busy ? "Submitting..." : (submission ? "Save & Resubmit" : "Submit Assignment")}
+                              </Button>
+                              {isEditingState && (
+                                <Button variant="ghost" onClick={() => setIsEditingState(false)} className="rounded-sm h-11 font-bold text-slate-500">
+                                  Cancel
+                                </Button>
+                              )}
+                            </div>
+                            {submissionError && <div className="text-xs text-red-500 font-medium text-center">{submissionError}</div>}
+                          </form>
+                        )
+                      )}
+                    </>
                   )}
                 </div>
               </div>
@@ -758,17 +1026,19 @@ export default function SubtopicView() {
                     <div className="inline-block relative">
                       <Button
                         onClick={() => navigate(`/subtopic/${next_subtopic.id}`)}
-                        disabled={(submission?.status !== 'approved' && user?.role !== 'mentor') || busy}
-                        className={`bg-[#194BFB] hover:bg-[#0F3AE5] text-white rounded-sm h-11 px-8 text-xs font-bold uppercase tracking-widest shadow-lg shadow-blue-100 ${((submission?.status !== 'approved' && user?.role !== 'mentor') || busy) ? 'pointer-events-none' : ''}`}
+                        disabled={(!isCompleted && user?.role !== 'mentor') || busy}
+                        className={`bg-[#194BFB] hover:bg-[#0F3AE5] text-white rounded-sm h-11 px-8 text-xs font-bold uppercase tracking-widest shadow-lg shadow-blue-100 ${((!isCompleted && user?.role !== 'mentor') || busy) ? 'pointer-events-none' : ''}`}
                       >
                         {busy ? "..." : (next_subtopic ? "Next Subtopic" : "Finish Course")} <ArrowRight className="ml-2 h-4 w-4" />
                       </Button>
                     </div>
                   </TooltipTrigger>
-                  {(submission?.status !== 'approved' && user?.role !== 'mentor') && (
+                  {(!isCompleted && user?.role !== 'mentor') && (
                     <TooltipContent className="bg-red-500 text-white border-none rounded-sm text-[10px] font-bold p-3 shadow-xl shadow-red-100 flex items-center gap-2 animate-in zoom-in-95">
                       <Lock className="h-3 w-3" />
-                      Submit & get approval to unlock next subtopic
+                      {task?.task_type === 'coding'
+                        ? 'Pass all test cases to unlock next subtopic'
+                        : 'Submit & get approval to unlock next subtopic'}
                     </TooltipContent>
                   )}
                 </Tooltip>

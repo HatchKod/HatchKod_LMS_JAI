@@ -523,6 +523,20 @@ class TaskIn(BaseModel):
     instructions: Optional[str] = None
     expected_output: Optional[str] = None
     difficulty: Optional[str] = "easy"
+    task_type: Optional[str] = "project"   # "project" | "coding"
+    language: Optional[str] = "java"       # "java" | "python" | "javascript" | "cpp"
+
+
+class TaskTestCaseIn(BaseModel):
+    input: str = ""
+    expected_output: str
+    is_sample: bool = False
+    order_index: int = 0
+
+
+class CodeSubmitIn(BaseModel):
+    code: str
+    language: Optional[str] = None   # falls back to task.language if omitted
 
 
 class ReorderIn(BaseModel):
@@ -1117,7 +1131,6 @@ async def reorder_subtopics_admin(payload: ReorderModulesIn, _: dict = Depends(r
 
 @api.post("/admin/subtopics/{subtopic_id}/task")
 async def upsert_task_admin(subtopic_id: str, payload: TaskIn, _: dict = Depends(require_roles("admin"))):
-    # Check if task exists
     existing = get_single_or_none(supabase.table("tasks").select("id").eq("subtopic_id", subtopic_id))
     doc = {
         "subtopic_id": subtopic_id,
@@ -1125,16 +1138,15 @@ async def upsert_task_admin(subtopic_id: str, payload: TaskIn, _: dict = Depends
         "instructions": payload.instructions,
         "expected_output": payload.expected_output,
         "difficulty": payload.difficulty,
-        "created_at": iso(now_utc()) if not existing else None
+        "task_type": payload.task_type or "project",
+        "language": payload.language or "java",
     }
     if existing:
-        doc.pop("created_at")
         supabase.table("tasks").update(doc).eq("id", existing["id"]).execute()
     else:
         doc["id"] = str(uuid.uuid4())
+        doc["created_at"] = iso(now_utc())
         supabase.table("tasks").insert(doc).execute()
-    
-    # Return full task
     return get_single_or_none(supabase.table("tasks").select("*").eq("subtopic_id", subtopic_id))
 
 @api.get("/courses/{course_id}/full")
@@ -1258,16 +1270,30 @@ async def get_subtopic(subtopic_id: str, user: dict = Depends(require_active_acc
 
     task = subtopic["tasks"][0] if subtopic.get("tasks") and len(subtopic["tasks"]) > 0 else None
     submission = None
-    
+    last_code_submission = None
+
     if user["role"] == "student" and topic_raw.get("id"):
         # Check unlock status directly
         unlocked = await is_topic_unlocked(user["id"], topic_raw["id"])
         if not unlocked:
             raise HTTPException(status_code=403, detail="Topic is locked. Complete previous topics first.")
-            
+
         if task:
-            sub_res = supabase.table("submissions").select("*").eq("task_id", task["id"]).eq("student_id", user["id"]).order("submitted_at", desc=True).limit(1).execute()
-            submission = sub_res.data[0] if sub_res.data else None
+            task_type = task.get("task_type", "project")
+            if task_type == "coding":
+                # Attach sample test cases so student sees the format
+                tc_res = supabase.table("task_test_cases").select(
+                    "id, input, expected_output, is_sample, order_index"
+                ).eq("task_id", task["id"]).eq("is_sample", True).order("order_index").execute()
+                task["sample_test_cases"] = tc_res.data or []
+                # Restore last code submission for the editor
+                lcs_res = supabase.table("task_code_submissions").select(
+                    "code, language, status, test_results, submitted_at"
+                ).eq("student_id", user["id"]).eq("subtopic_id", subtopic_id).order("submitted_at", desc=True).limit(1).execute()
+                last_code_submission = lcs_res.data[0] if lcs_res.data else None
+            else:
+                sub_res = supabase.table("submissions").select("*").eq("task_id", task["id"]).eq("student_id", user["id"]).order("submitted_at", desc=True).limit(1).execute()
+                submission = sub_res.data[0] if sub_res.data else None
 
     # Calculate next/prev and index
     all_subtopics = []
@@ -1294,6 +1320,7 @@ async def get_subtopic(subtopic_id: str, user: dict = Depends(require_active_acc
         "topic": topic_raw,
         "task": task,
         "submission": submission,
+        "last_code_submission": last_code_submission,
         "next_subtopic": next_sub,
         "prev_subtopic": prev_sub,
         "total_subtopics": len(all_subtopics),
@@ -1311,7 +1338,9 @@ async def upsert_task(subtopic_id: str, payload: TaskIn, _: dict = Depends(requi
         "description": payload.description,
         "instructions": payload.instructions,
         "expected_output": payload.expected_output,
-        "difficulty": payload.difficulty
+        "difficulty": payload.difficulty,
+        "task_type": payload.task_type or "project",
+        "language": payload.language or "java",
     }
     if existing:
         res = supabase.table("tasks").update(doc).eq("subtopic_id", subtopic_id).execute().data
@@ -1325,6 +1354,209 @@ async def upsert_task(subtopic_id: str, payload: TaskIn, _: dict = Depends(requi
 async def delete_task(subtopic_id: str, _: dict = Depends(require_roles("admin"))):
     supabase.table("tasks").delete().eq("subtopic_id", subtopic_id).execute()
     return {"ok": True}
+
+
+# -------------------- Coding Task: Test Cases (Admin) --------------------
+
+@api.get("/tasks/{task_id}/test-cases")
+async def list_task_test_cases(task_id: str, _: dict = Depends(require_roles("admin", "mentor"))):
+    res = supabase.table("task_test_cases").select("*").eq("task_id", task_id).order("order_index").execute()
+    return res.data or []
+
+
+@api.post("/tasks/{task_id}/test-cases")
+async def add_task_test_case(task_id: str, payload: TaskTestCaseIn, _: dict = Depends(require_roles("admin", "mentor"))):
+    doc = {
+        "id": str(uuid.uuid4()),
+        "task_id": task_id,
+        "input": payload.input,
+        "expected_output": payload.expected_output,
+        "is_sample": payload.is_sample,
+        "order_index": payload.order_index,
+        "created_at": iso(now_utc()),
+    }
+    res = supabase.table("task_test_cases").insert(doc).execute()
+    return res.data[0] if res.data else doc
+
+
+@api.put("/task-test-cases/{tc_id}")
+async def update_task_test_case(tc_id: str, payload: TaskTestCaseIn, _: dict = Depends(require_roles("admin", "mentor"))):
+    doc = {
+        "input": payload.input,
+        "expected_output": payload.expected_output,
+        "is_sample": payload.is_sample,
+        "order_index": payload.order_index,
+    }
+    res = supabase.table("task_test_cases").update(doc).eq("id", tc_id).execute()
+    return res.data[0] if res.data else doc
+
+
+@api.delete("/task-test-cases/{tc_id}")
+async def delete_task_test_case(tc_id: str, _: dict = Depends(require_roles("admin", "mentor"))):
+    supabase.table("task_test_cases").delete().eq("id", tc_id).execute()
+    return {"ok": True}
+
+
+# -------------------- Coding Task: Submit Code (Student) --------------------
+
+@api.post("/subtopics/{subtopic_id}/submit-code")
+async def submit_code_task(subtopic_id: str, payload: CodeSubmitIn, user: dict = Depends(require_active_role("student"))):
+    if not payload.code.strip():
+        raise HTTPException(400, "Code cannot be empty")
+
+    # Validate subtopic and task
+    task = get_single_or_none(supabase.table("tasks").select("*").eq("subtopic_id", subtopic_id))
+    if not task:
+        raise HTTPException(404, "No task for this subtopic")
+    if task.get("task_type", "project") != "coding":
+        raise HTTPException(400, "This task is not a coding task")
+
+    # Enforce module-level payment access
+    sub_topic_res = supabase.table("subtopics").select("topic_id").eq("id", subtopic_id).single().execute()
+    if sub_topic_res.data:
+        topic_id = sub_topic_res.data.get("topic_id")
+        topic_mod_res = supabase.table("topics").select("module_id").eq("id", topic_id).single().execute()
+        if topic_mod_res.data:
+            module_id = topic_mod_res.data.get("module_id")
+            if module_id:
+                effective_tier = user.get("effective_tier", "demo")
+                if effective_tier != "full":
+                    has_access = check_module_access(user["id"], module_id, effective_tier, user.get("batch_id"))
+                    if not has_access:
+                        raise HTTPException(403, "Module access denied under current tier.")
+
+    # Get all test cases for this task
+    test_cases = supabase.table("task_test_cases").select("*").eq("task_id", task["id"]).order("order_index").execute().data or []
+    if not test_cases:
+        raise HTTPException(400, "No test cases configured for this task yet. Contact your admin.")
+
+    language = (payload.language or task.get("language", "java")).lower()
+    lang_map = {"java": 62, "python": 71, "javascript": 63, "cpp": 54}
+    judge0_lang_id = lang_map.get(language, 62)
+    judge0_headers = {"X-Auth-Token": JUDGE0_AUTH_TOKEN} if JUDGE0_AUTH_TOKEN else {}
+
+    results = []
+    all_passed = True
+    overall_status = "accepted"
+
+    async with httpx.AsyncClient() as client:
+        for tc in test_cases:
+            try:
+                res = await client.post(f"{JUDGE0_URL}/submissions?wait=true", json={
+                    "source_code": payload.code,
+                    "language_id": judge0_lang_id,
+                    "stdin": tc["input"],
+                }, headers=judge0_headers, timeout=15.0)
+
+                if res.status_code not in (200, 201):
+                    all_passed = False
+                    overall_status = "error"
+                    results.append({
+                        "test_case_id": tc["id"],
+                        "passed": False,
+                        "actual_output": f"Engine Error: {res.text}",
+                        "is_sample": tc["is_sample"],
+                        "input": tc["input"] if tc["is_sample"] else None,
+                        "expected_output": tc["expected_output"] if tc["is_sample"] else None,
+                    })
+                    break
+
+                data = res.json()
+
+                # Compilation error
+                if data.get("status", {}).get("id") == 6:
+                    all_passed = False
+                    overall_status = "compilation_error"
+                    results.append({
+                        "test_case_id": tc["id"],
+                        "passed": False,
+                        "actual_output": data.get("compile_output") or "Compilation Error",
+                        "is_sample": tc["is_sample"],
+                        "input": tc["input"] if tc["is_sample"] else None,
+                        "expected_output": tc["expected_output"] if tc["is_sample"] else None,
+                    })
+                    break
+
+                actual = (data.get("stdout") or "").strip()
+                expected = tc["expected_output"].strip()
+                passed = actual == expected
+                if not passed:
+                    all_passed = False
+                    overall_status = "wrong_answer"
+
+                results.append({
+                    "test_case_id": tc["id"],
+                    "passed": passed,
+                    "actual_output": actual,
+                    "is_sample": tc["is_sample"],
+                    "input": tc["input"] if tc["is_sample"] else None,
+                    "expected_output": tc["expected_output"] if tc["is_sample"] else None,
+                })
+
+            except httpx.TimeoutException:
+                all_passed = False
+                overall_status = "error"
+                results.append({
+                    "test_case_id": tc["id"],
+                    "passed": False,
+                    "actual_output": "Time Limit Exceeded",
+                    "is_sample": tc["is_sample"],
+                    "input": tc["input"] if tc["is_sample"] else None,
+                    "expected_output": tc["expected_output"] if tc["is_sample"] else None,
+                })
+                break
+            except Exception as e:
+                all_passed = False
+                overall_status = "error"
+                results.append({
+                    "test_case_id": tc["id"],
+                    "passed": False,
+                    "actual_output": f"Runner Error: {str(e)}",
+                    "is_sample": tc["is_sample"],
+                    "input": tc["input"] if tc["is_sample"] else None,
+                    "expected_output": tc["expected_output"] if tc["is_sample"] else None,
+                })
+                break
+
+    # Persist the attempt
+    supabase.table("task_code_submissions").insert({
+        "id": str(uuid.uuid4()),
+        "task_id": task["id"],
+        "subtopic_id": subtopic_id,
+        "student_id": user["id"],
+        "code": payload.code,
+        "language": language,
+        "status": overall_status,
+        "test_results": results,
+        "submitted_at": iso(now_utc()),
+    }).execute()
+
+    # All tests passed → auto-complete subtopic + award XP
+    xp_data = None
+    if all_passed:
+        already_done = get_single_or_none(
+            supabase.table("student_progress").select("is_completed")
+            .eq("student_id", user["id"]).eq("subtopic_id", subtopic_id).eq("is_completed", True)
+        )
+        supabase.table("student_progress").upsert({
+            "student_id": user["id"],
+            "subtopic_id": subtopic_id,
+            "is_completed": True,
+            "completed_at": iso(now_utc()),
+        }).execute()
+        if not already_done:
+            try:
+                xp_data = award_xp(user["id"], "project_approved")  # 150 XP
+            except Exception as e:
+                logger.error(f"XP award error in submit-code: {e}")
+
+    return {
+        "status": overall_status,
+        "all_passed": all_passed,
+        "test_results": results,
+        "gamification": xp_data,
+    }
+
 
 # -------------------- Lock/Unlock helper --------------------
 async def get_ordered_topics(course_id: str) -> list:
@@ -1540,10 +1772,14 @@ async def complete_subtopic(subtopic_id: str, payload: TopicCompleteIn, user: di
                 if not has_access:
                     raise HTTPException(status_code=403, detail="Module access denied under current tier.")
 
-    # If it's a task subtopic, it cannot be manually completed
-    has_task = get_single_or_none(supabase.table("tasks").select("id").eq("subtopic_id", subtopic_id))
+    # If it's a task subtopic, manual completion is blocked (must go through proper flow)
+    has_task = get_single_or_none(supabase.table("tasks").select("id, task_type").eq("subtopic_id", subtopic_id))
     if has_task:
-        raise HTTPException(400, "Subtopics with tasks must be approved by a mentor.")
+        task_type = has_task.get("task_type", "project")
+        if task_type == "coding":
+            raise HTTPException(400, "Coding tasks must be completed by passing all test cases.")
+        else:
+            raise HTTPException(400, "Subtopics with tasks must be approved by a mentor.")
 
     # Record completion
     supabase.table("student_progress").upsert({
@@ -1953,6 +2189,16 @@ async def student_dashboard(user: dict = Depends(require_roles("student"))):
         progress_set = {p["subtopic_id"] for p in progress_records if p.get("subtopic_id")}
         mentor = mentor_data[0] if mentor_data else None
 
+        # Build per-course mentor lookup: course_id → mentor object
+        mentor_by_id = {m["id"]: m for m in mentor_data}
+        course_mentor_map = {}
+        for e in enroll_res.data:
+            b = e.get("batches") or {}
+            cid = b.get("course_id")
+            mid = b.get("mentor_id")
+            if cid and mid and cid not in course_mentor_map:
+                course_mentor_map[cid] = mentor_by_id.get(mid)
+
         # Determine tier access in one batch query (no per-course queries)
         effective_tier = get_effective_tier(user)
         allowed_module_ids = set()
@@ -2022,7 +2268,8 @@ async def student_dashboard(user: dict = Depends(require_roles("student"))):
                 "progress": round((completed_count / total * 100)) if total > 0 else 0,
                 "completed_topics": completed_count,
                 "total_topics": total,
-                "module_count": module_count
+                "module_count": module_count,
+                "mentor": course_mentor_map.get(course["id"])
             })
 
         # 4. Process pending submissions
@@ -2167,6 +2414,7 @@ async def admin_dashboard(_: dict = Depends(require_roles("admin"))):
 class ExecuteIn(BaseModel):
     code: str
     stdin: str = ""
+    language: str = "java"
 
 
 @app.post("/api/execute")
@@ -2174,12 +2422,15 @@ async def execute_code(payload: ExecuteIn):
     if not payload.code.strip():
         raise HTTPException(status_code=400, detail="Code cannot be empty")
 
+    lang_map = {"java": 62, "python": 71, "javascript": 63, "cpp": 54}
+    language_id = lang_map.get(payload.language.lower(), 62)
+
     headers = {"X-Auth-Token": JUDGE0_AUTH_TOKEN} if JUDGE0_AUTH_TOKEN else {}
     async with httpx.AsyncClient() as client:
         try:
             res = await client.post(f"{JUDGE0_URL}/submissions?wait=true", json={
                 "source_code": payload.code,
-                "language_id": 62,  # Java (OpenJDK 13)
+                "language_id": language_id,
                 "stdin": payload.stdin
             }, headers=headers, timeout=30.0)
             

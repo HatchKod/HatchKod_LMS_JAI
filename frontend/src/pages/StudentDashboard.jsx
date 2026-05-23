@@ -244,7 +244,7 @@ export default function StudentDashboard() {
         </div>
 
         <div className="grid grid-cols-1 gap-6">
-          {currentCourses.map(({ course, progress, completed_topics, total_topics, module_count }) => (
+          {currentCourses.map(({ course, progress, completed_topics, total_topics, module_count, mentor: courseMentor }) => (
             <Card key={course.id} className="rounded-sm border-border bg-white p-0 overflow-hidden shadow-sm hover:shadow-md transition-shadow group" data-testid={`course-card-${course.id}`}>
               <div className="flex flex-col md:flex-row">
                 {/* Left Side: Course Info */}
@@ -270,10 +270,10 @@ export default function StudentDashboard() {
                       <div className="flex items-center gap-2">
                         <Avatar className="h-6 w-6">
                           <AvatarFallback className="bg-slate-100 text-slate-600 text-[8px] font-bold">
-                            {data.mentor ? data.mentor.name.split(" ").map(n => n[0]).join("") : "??"}
+                            {courseMentor ? courseMentor.name.split(" ").map(n => n[0]).join("") : "??"}
                           </AvatarFallback>
                         </Avatar>
-                        <span className="text-xs font-semibold text-slate-700">{data.mentor?.name || "Unassigned"}</span>
+                        <span className="text-xs font-semibold text-slate-700">{courseMentor?.name || "Unassigned"}</span>
                       </div>
                     </div>
                     <div className="space-y-1">
