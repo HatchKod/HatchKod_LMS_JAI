@@ -74,13 +74,14 @@ def user_key_builder(
     prefix = f"{FastAPICache.get_prefix()}:{namespace}:{func.__module__}:{func.__name__}"
     user = kwargs.get("user")
     if user and isinstance(user, dict) and "id" in user:
-        key = f"{prefix}:user:{user['id']}:{args}:{kwargs}"
-        # logger.debug(f"Generated cache key for user {user['id']}: {key}")
-        return key
-    
-    key = f"{prefix}:{args}:{kwargs}"
-    # logger.debug(f"Generated generic cache key: {key}")
-    return key
+        # Key scoped only by user ID — never include full kwargs dict to avoid
+        # serialization inconsistencies that collapse all users to the same key
+        return f"{prefix}:user:{user['id']}"
+    # No user resolved — fall back to request-level uniqueness to avoid cross-user hits
+    if request:
+        auth = request.headers.get("authorization", "")
+        return f"{prefix}:req:{hash(auth)}"
+    return f"{prefix}:anonymous"
 
 # -------------------- Config --------------------
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -1895,7 +1896,6 @@ async def admin_create_user(payload: AdminUserIn, _: dict = Depends(require_role
 
 # -------------------- Dashboards --------------------
 @api.get("/dashboard/student")
-@cache(expire=120, key_builder=user_key_builder)
 async def student_dashboard(user: dict = Depends(require_roles("student"))):
     try:
         # 1. Get batch/course context
@@ -3802,7 +3802,30 @@ async def get_batch_attendance_summary(batch_id: str, user: dict = Depends(requi
         return [{"error": str(e)}]
 
 
+@api.get("/students/me/enrolled-batches")
+async def get_my_enrolled_batches(user: dict = Depends(require_roles("student"))):
+    batch_res = supabase.table("batch_students")\
+        .select("batch_id, batches(id, name, course_id, courses(id, title))")\
+        .eq("student_id", user["id"]).execute().data or []
+    result = []
+    seen_course_ids = set()
+    for b in batch_res:
+        batches = b.get("batches") or {}
+        courses = batches.get("courses") or {}
+        course_id = courses.get("id")
+        if course_id and course_id not in seen_course_ids:
+            seen_course_ids.add(course_id)
+            result.append({
+                "batch_id": b["batch_id"],
+                "batch_name": batches.get("name", ""),
+                "course_id": course_id,
+                "course_title": courses.get("title", "")
+            })
+    return result
+
+
 @api.get("/students/{student_id}/progress")
+@cache(expire=180, key_builder=user_key_builder)
 async def get_specific_student_progress(student_id: str, batchId: str = None, user: dict = Depends(get_current_user)):
     # 1. Permission check: Admin, Mentor (if assigned), or the Student themselves
     if user["role"] == "student" and user["id"] != student_id:
@@ -3833,7 +3856,9 @@ async def get_specific_student_progress(student_id: str, batchId: str = None, us
     if not course: return {"course_title": None, "error": "No course enrolled"}
 
     # 4. Get Syllabus
-    modules = supabase.table("modules").select("*, topics(*, subtopics(*))").eq("course_id", course["id"]).order("sequence_order").execute().data or []
+    modules = supabase.table("modules").select(
+        "id, title, sequence_order, topics(id, title, sequence_order, subtopics(id, title, sequence_order))"
+    ).eq("course_id", course["id"]).order("sequence_order").execute().data or []
     
     # Sort topics and subtopics by sequence_order consistently
     for m in modules:
@@ -3880,94 +3905,88 @@ async def get_specific_student_progress(student_id: str, batchId: str = None, us
     lc_map = {lc["subtopic_id"]: lc for lc in lc_res}
 
     # 6. Build Result
+    # Pre-fetch all tasks for this course's subtopics in one query (avoids N+1)
+    all_subtopic_ids = [
+        s["id"]
+        for m in modules
+        for t in m.get("topics", [])
+        for s in t.get("subtopics", [])
+    ]
+    subtopic_task_map = {}
+    if all_subtopic_ids:
+        tasks_bulk = supabase.table("tasks").select("id, subtopic_id")\
+            .in_("subtopic_id", all_subtopic_ids).execute().data or []
+        for task in tasks_bulk:
+            sid = task["subtopic_id"]
+            if sid not in subtopic_task_map:
+                subtopic_task_map[sid] = task["id"]
+
     res_modules = []
     total_subtopics = 0
     completed_subtopics = 0
     total_time = 0
+    current_subtopic = None
 
     for m in modules:
-        m_topics = []
         m_total_sub = 0
         m_done_sub = 0
-        
+
         for t in m.get("topics", []):
-            t_subtopics = []
             for s in t.get("subtopics", []):
                 total_subtopics += 1
                 m_total_sub += 1
-                
-                has_task = supabase.table("tasks").select("id").eq("subtopic_id", s["id"]).limit(1).execute().data
-                
+
+                task_id = subtopic_task_map.get(s["id"])
                 is_done = False
-                comp_at = None
-                time_spent = 0
-                
-                if has_task:
-                    task_id = has_task[0]["id"]
+
+                if task_id:
                     is_done = task_id in approved_tasks
                 else:
                     is_done = s["id"] in progress_set or s["id"] in lc_map
-                    
+
                 if s["id"] in lc_map:
-                    comp_at = lc_map[s["id"]]["completed_at"]
-                    time_spent = lc_map[s["id"]]["time_spent_minutes"] or 0
+                    total_time += lc_map[s["id"]]["time_spent_minutes"] or 0
                 elif s["id"] in progress_set:
                     is_done = True
-                    
+
                 if is_done:
                     m_done_sub += 1
                     completed_subtopics += 1
-                    
-                total_time += time_spent
-                
-                t_subtopics.append({
-                    "id": s["id"],
-                    "title": s["title"],
-                    "is_completed": is_done,
-                    "completed_at": comp_at,
-                    "time_spent_minutes": time_spent
-                })
-                
-            m_topics.append({
-                "id": t["id"],
-                "title": t["title"],
-                "subtopics": t_subtopics
-            })
+
+                if current_subtopic is None and not is_done:
+                    current_subtopic = {
+                        "subtopic_id": s["id"],
+                        "subtopic_title": s["title"],
+                        "topic_title": t["title"],
+                        "module_title": m["title"],
+                        "tier_locked": m.get("tier_locked", False)
+                    }
 
         res_modules.append({
             "id": m["id"],
             "title": m["title"],
-            "topics": m_topics,
             "tier_locked": m.get("tier_locked", False),
             "total_subtopics": m_total_sub,
             "completed_subtopics": m_done_sub,
             "completion_percentage": round(m_done_sub / m_total_sub * 100) if m_total_sub > 0 else 0
         })
 
-    # 7. Find next incomplete subtopic
-    current_subtopic = None
-    for m in res_modules:
-        for t in m["topics"]:
-            for s in t["subtopics"]:
-                if not s["is_completed"]:
-                    current_subtopic = {
-                        "subtopic_id": s["id"],
-                        "subtopic_title": s["title"],
-                        "topic_title": t["title"],
-                        "module_title": m["title"]
-                    }
-                    break
-            if current_subtopic: break
-        if current_subtopic: break
+    first_completed_at = min(
+        (lc["completed_at"] for lc in lc_res if lc.get("completed_at")),
+        default=None
+    )
 
     return {
+        "course_id": course["id"],
         "course_title": course["title"],
         "batch_name": batch["name"],
         "overall_percentage": round(completed_subtopics / total_subtopics * 100) if total_subtopics > 0 else 0,
         "total_subtopics": total_subtopics,
         "completed_subtopics": completed_subtopics,
         "total_time_spent_minutes": total_time,
-        "modules": res_modules,
+        "completed_modules": sum(1 for m in res_modules if m["completion_percentage"] == 100),
+        "total_modules": len(res_modules),
+        "first_completed_at": first_completed_at,
         "current_subtopic": current_subtopic
     }
 

@@ -16,7 +16,6 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "../c
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../components/ui/tooltip";
 import Navbar from "../components/Navbar";
 import Breadcrumbs from "../components/Breadcrumbs";
-import PaymentWall from "../components/PaymentWall";
 import ReactMarkdown from "react-markdown";
 
 export default function SubtopicView() {
@@ -40,7 +39,6 @@ export default function SubtopicView() {
   const [isCompleted, setIsCompleted] = useState(false);
   const [completedAt, setCompletedAt] = useState(null);
   const [isSyllabusOpen, setIsSyllabusOpen] = useState(false);
-  const [showPaymentWall, setShowPaymentWall] = useState(false);
   const startTimeRef = useRef(Date.now());
 
   const load = async () => {
@@ -69,15 +67,11 @@ export default function SubtopicView() {
     } catch (e) {
       const detail = e.response?.data?.detail;
       if (e.response?.status === 403) {
-        if (detail && detail.code === "TIER_LOCKED") {
-          setShowPaymentWall(true);
+        if (detail?.code === "TIER_LOCKED" || detail?.code === "ACCESS_EXPIRED") {
+          navigate("/billing", { replace: true });
           return;
         }
-        if (detail && detail.code === "ACCESS_EXPIRED") {
-          toast.error("Your trial access has expired. Please make payment.");
-        } else {
-          toast.error(typeof detail === "string" ? detail : (detail?.message || "This module is not included in your current plan."));
-        }
+        toast.error(typeof detail === "string" ? detail : (detail?.message || "Access denied."));
         navigate("/dashboard");
         return;
       }
@@ -251,10 +245,6 @@ export default function SubtopicView() {
     );
   }
 
-  if (showPaymentWall) {
-    return <PaymentWall />;
-  }
-
   if (!data || !data.subtopic) {
     return (
       <div className="min-h-screen bg-white">
@@ -297,6 +287,15 @@ export default function SubtopicView() {
   const isStudent = user?.role === "student";
   const isEditingState = isEditing;
   const setIsEditingState = setIsEditing;
+
+  // Sidebar lock state: flatten all subtopics in order; everything after the
+  // first incomplete subtopic is locked for students.
+  const allFlatSubtopics = (course?.modules || []).flatMap(m =>
+    (m.topics || []).flatMap(t => t.subtopics || [])
+  );
+  const sidebarFrontierIdx = isStudent
+    ? allFlatSubtopics.findIndex(s => !s.completed)
+    : -1;
 
   const getEmbedUrl = (url) => {
     if (!url) return "";
@@ -355,38 +354,72 @@ export default function SubtopicView() {
                         <h4 className="font-bold text-slate-900 uppercase tracking-wider text-xs">{m.title}</h4>
                       </div>
                       <div className="space-y-4 ml-6">
-                        {m.topics?.map((t, ti) => (
-                          <div key={t.id} className="space-y-2">
-                            <div className="flex items-center gap-2 px-3 py-1">
-                               <div className="h-1.5 w-1.5 rounded-full bg-slate-300" />
-                               <span className="text-xs font-bold text-slate-500 uppercase tracking-tight">Topic: {t.title}</span>
-                            </div>
+                        {m.topics?.map((t) => {
+                          const topicSubs = t.subtopics || [];
+                          const topicAllDone = topicSubs.length > 0 && topicSubs.every(s => s.completed);
+
+                          return (
+                            <div key={t.id} className="space-y-2">
+                              {/* Topic header */}
+                              <div className="flex items-center gap-2 px-3 py-1">
+                                {topicAllDone
+                                  ? <Check className="h-3 w-3 text-emerald-500 shrink-0" />
+                                  : <div className="h-1.5 w-1.5 rounded-full bg-slate-300 shrink-0" />
+                                }
+                                <span className={`text-xs font-bold uppercase tracking-tight ${topicAllDone ? 'text-emerald-600' : 'text-slate-500'}`}>
+                                  Topic: {t.title}
+                                </span>
+                              </div>
+
+                              {/* Subtopics */}
                               <div className="space-y-1 ml-3">
-                                {t.subtopics?.map((s, si) => {
+                                {topicSubs.map((s, si) => {
+                                  const globalIdx = allFlatSubtopics.findIndex(x => x.id === s.id);
                                   const isCurrent = s.id === id;
-                                  const isCompleted = s.completed;
-                                  const isLocked = s.unlocked === false && user?.role === 'student';
-                                  
-                                  const content = (
+                                  const isSubCompleted = !!s.completed;
+                                  const isLocked = isStudent && !isSubCompleted && sidebarFrontierIdx !== -1 && globalIdx > sidebarFrontierIdx;
+
+                                  const pill = (
                                     <Link
                                       key={s.id}
                                       to={isLocked ? '#' : `/subtopic/${s.id}`}
                                       onClick={(e) => {
-                                        if (isLocked) {
-                                          e.preventDefault();
-                                          return;
-                                        }
+                                        if (isLocked) { e.preventDefault(); return; }
                                         setIsSyllabusOpen(false);
                                       }}
-                                      className={`flex items-center justify-between p-2 rounded-sm border transition-all ${isCurrent ? 'bg-[#194BFB]/5 border-[#194BFB] ring-1 ring-[#194BFB]/10' : (isLocked ? 'bg-slate-50 border-slate-100 opacity-60 cursor-not-allowed' : 'bg-white border-slate-200 hover:border-[#194BFB] hover:shadow-sm')}`}
+                                      className={`flex items-center justify-between p-2 rounded-sm border transition-all ${
+                                        isCurrent
+                                          ? 'bg-[#194BFB]/5 border-[#194BFB] ring-1 ring-[#194BFB]/10'
+                                          : isLocked
+                                            ? 'bg-slate-50 border-slate-100 opacity-50 cursor-not-allowed'
+                                            : 'bg-white border-slate-200 hover:border-[#194BFB] hover:shadow-sm'
+                                      }`}
                                     >
                                       <div className="flex items-center gap-3 min-w-0">
-                                        <div className={`h-4 w-4 rounded-full flex items-center justify-center shrink-0 border ${isCompleted ? 'bg-emerald-500 border-emerald-500 text-white' : 'bg-white border-slate-200'}`}>
-                                          {isCompleted ? <Check className="h-2 w-2 stroke-[3]" /> : (isLocked ? <Lock className="h-2 w-2 text-slate-400" /> : <div className="h-1 w-1 rounded-full bg-slate-200" />)}
+                                        {/* State icon */}
+                                        <div className={`h-4 w-4 rounded-full flex items-center justify-center shrink-0 border ${
+                                          isSubCompleted
+                                            ? 'bg-emerald-500 border-emerald-500 text-white'
+                                            : isLocked
+                                              ? 'bg-slate-100 border-slate-200'
+                                              : isCurrent
+                                                ? 'bg-[#194BFB]/10 border-[#194BFB]/50'
+                                                : 'bg-white border-slate-200'
+                                        }`}>
+                                          {isSubCompleted
+                                            ? <Check className="h-2 w-2 stroke-[3]" />
+                                            : isLocked
+                                              ? <Lock className="h-2 w-2 text-slate-400" />
+                                              : isCurrent
+                                                ? <div className="h-1.5 w-1.5 rounded-full bg-[#194BFB]" />
+                                                : <div className="h-1 w-1 rounded-full bg-slate-300" />
+                                          }
                                         </div>
-                                        <span className={`text-[13px] font-bold truncate ${isCurrent ? 'text-[#194BFB]' : (isLocked ? 'text-slate-400' : 'text-slate-600')}`}>{s.title}</span>
+                                        <span className={`text-[13px] font-bold truncate ${
+                                          isCurrent ? 'text-[#194BFB]' : isLocked ? 'text-slate-400' : 'text-slate-700'
+                                        }`}>{s.title}</span>
                                       </div>
-                                      {isCurrent && <div className="h-1.5 w-1.5 rounded-full bg-[#194BFB] animate-pulse" />}
+                                      {isCurrent && <div className="h-1.5 w-1.5 rounded-full bg-[#194BFB] animate-pulse shrink-0 ml-2" />}
                                     </Link>
                                   );
 
@@ -394,21 +427,20 @@ export default function SubtopicView() {
                                     <TooltipProvider key={s.id}>
                                       <Tooltip>
                                         <TooltipTrigger asChild>
-                                          <div className="cursor-not-allowed">
-                                            {content}
-                                          </div>
+                                          <div className="cursor-not-allowed">{pill}</div>
                                         </TooltipTrigger>
-                                        <TooltipContent side="right" className="bg-red-500 text-white border-none rounded-sm text-[10px] font-bold p-3 shadow-xl flex items-center gap-2 animate-in zoom-in-95">
+                                        <TooltipContent side="right" className="bg-slate-900 text-white border-none rounded-sm text-[10px] font-bold p-3 shadow-xl flex items-center gap-2 animate-in zoom-in-95">
                                           <Lock className="h-3 w-3" />
-                                          Complete "{si > 0 ? t.subtopics[si-1].title : 'previous topic'}" to unlock
+                                          Complete "{si > 0 ? topicSubs[si - 1].title : 'previous topic'}" to unlock
                                         </TooltipContent>
                                       </Tooltip>
                                     </TooltipProvider>
-                                  ) : content;
+                                  ) : pill;
                                 })}
                               </div>
-                          </div>
-                        ))}
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   ))}

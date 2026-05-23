@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from "react";
-import { Lock, Mail, MessageSquare, AlertCircle, CheckCircle, CreditCard, Tag, ChevronDown, ChevronUp, X } from "lucide-react";
+import { Mail, MessageSquare, AlertCircle, CheckCircle, CreditCard, Tag, ChevronDown, ChevronUp, X } from "lucide-react";
 import { Button } from "./ui/button";
 import { useAuth } from "../lib/auth";
 import { createRazorpayOrder, verifyRazorpayPayment } from "../lib/payment";
 import { toast } from "sonner";
 import { api, formatApiError } from "../lib/api";
+import Navbar from "./Navbar";
 
 export default function PaymentWall() {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
 
   // ── Referral state ─────────────────────────────────────────────────────────
   const [refExpanded, setRefExpanded] = useState(false);
@@ -133,22 +134,7 @@ export default function PaymentWall() {
       {/* Background grid pattern */}
       <div className="absolute inset-0 bg-[linear-gradient(to_right,#111_1px,transparent_1px),linear-gradient(to_bottom,#111_1px,transparent_1px)] bg-[size:40px_40px] pointer-events-none opacity-40" />
 
-      {/* Header */}
-      <header className="border-b border-[#222] bg-[#0A0A0A]/80 backdrop-blur-md px-6 py-4 flex items-center justify-between z-10">
-        <div className="flex items-center gap-2">
-          <div className="h-8 w-8 bg-[#194BFB] flex items-center justify-center font-black text-sm tracking-tighter">
-            HK
-          </div>
-          <span className="text-sm font-black tracking-[0.2em] uppercase">HatchKod <span className="text-[#194BFB]">LMS</span></span>
-        </div>
-        <Button
-          variant="ghost"
-          onClick={logout}
-          className="text-xs font-semibold tracking-wider uppercase border border-[#333] hover:bg-[#194BFB] hover:text-white rounded-none h-9 px-4 transition-all"
-        >
-          Sign Out
-        </Button>
-      </header>
+      <Navbar />
 
       {/* Main Content */}
       <main className="flex-1 flex items-center justify-center px-4 py-12 z-10">

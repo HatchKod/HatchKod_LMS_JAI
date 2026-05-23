@@ -6,9 +6,9 @@ import { Button } from "../components/ui/button";
 import { useAuth } from "../lib/auth";
 import { fetchPaymentStatus, fetchMyPaymentHistory, createRazorpayOrder, verifyRazorpayPayment } from "../lib/payment";
 import { 
-  CreditCard, Loader2, Calendar, CheckCircle2, ShieldCheck, 
+  CreditCard, Loader2, Calendar, CheckCircle2, ShieldCheck,
   HelpCircle, ArrowUpRight, History, Receipt, IndianRupee,
-  Clock, AlertTriangle, Tag, X, ChevronDown, ChevronUp
+  Clock, AlertTriangle, Tag, X, ChevronDown, ChevronUp, Zap
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -405,8 +405,40 @@ export default function StudentBilling() {
             </Card>
           </div>
 
-          {/* Pricing Config Card */}
+          {/* Right column */}
           <div className="space-y-6">
+
+            {/* Upgrade nudge — inline in layout, above Support card */}
+            {status && status.access_tier !== "full" && (
+              <div
+                className="overflow-hidden"
+                style={{
+                  background: "linear-gradient(145deg, #07102b 0%, #0a0a0a 100%)",
+                  border: "1px solid rgba(25,75,251,0.45)",
+                  boxShadow: "0 0 0 1px rgba(25,75,251,0.08), 0 0 28px rgba(25,75,251,0.4), 0 0 60px rgba(25,75,251,0.12)",
+                }}
+              >
+                <div className="h-[1.5px] w-full bg-gradient-to-r from-transparent via-[#194BFB] to-transparent" />
+                <div className="px-4 py-3.5 flex items-start gap-3">
+                  <div className="relative flex-shrink-0 mt-0.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#194BFB] opacity-20" />
+                    <div className="relative h-8 w-8 rounded-full bg-[#194BFB]/15 border border-[#194BFB]/35 flex items-center justify-center">
+                      <Zap className="h-3.5 w-3.5 text-[#194BFB]" />
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[9px] font-black uppercase tracking-[0.18em] text-[#194BFB] font-mono mb-1">
+                      Upgrade Required
+                    </div>
+                    <p className="text-[11px] text-slate-300 leading-snug">
+                      Complete payment to unlock{" "}
+                      <span className="text-white font-bold">all modules & labs</span>
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <Card className="border-[#222] bg-[#111] p-6 rounded-none space-y-6">
               <h3 className="text-xs font-black tracking-[0.2em] uppercase text-[#194BFB]">Support and Help</h3>
               
@@ -433,6 +465,7 @@ export default function StudentBilling() {
       <footer className="border-t border-[#222] bg-[#0A0A0A]/50 px-6 py-6 text-center text-xs text-slate-500 z-10 font-mono">
         &copy; {new Date().getFullYear()} HatchKod. Security Secured &bull; Strict Non-Refundable Trial Policies
       </footer>
+
     </div>
   );
 }

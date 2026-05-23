@@ -83,6 +83,7 @@ export default function Navbar({ unreadCount }) {
     }
   };
 
+  const isExpired = user?.access_tier === "expired";
   const isActive = (path) => location.pathname === path;
 
   return (
@@ -110,29 +111,33 @@ export default function Navbar({ unreadCount }) {
                 <LayoutDashboard className="h-4 w-4" />
                 Dashboard
               </Link>
-              <Link
-                to="/playground"
-                className={`flex items-center gap-2 px-3 py-2 text-sm font-medium transition-colors rounded-md ${
-                  isActive("/playground")
-                    ? "text-[#194BFB] bg-[#194BFB]/5"
-                    : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
-                }`}
-              >
-                <HelpCircle className="h-4 w-4" />
-                Codepad
-              </Link>
-              <Link
-                to="/problems"
-                className={`flex items-center gap-2 px-3 py-2 text-sm font-medium transition-colors rounded-md ${
-                  location.pathname.startsWith("/problems")
-                    ? "text-[#194BFB] bg-[#194BFB]/5"
-                    : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
-                }`}
-              >
-                <HelpCircle className="h-4 w-4" />
-                Challenges
-              </Link>
-              {user.role === "student" && (
+              {!isExpired && (
+                <Link
+                  to="/playground"
+                  className={`flex items-center gap-2 px-3 py-2 text-sm font-medium transition-colors rounded-md ${
+                    isActive("/playground")
+                      ? "text-[#194BFB] bg-[#194BFB]/5"
+                      : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
+                  }`}
+                >
+                  <HelpCircle className="h-4 w-4" />
+                  Codepad
+                </Link>
+              )}
+              {!isExpired && (
+                <Link
+                  to="/problems"
+                  className={`flex items-center gap-2 px-3 py-2 text-sm font-medium transition-colors rounded-md ${
+                    location.pathname.startsWith("/problems")
+                      ? "text-[#194BFB] bg-[#194BFB]/5"
+                      : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
+                  }`}
+                >
+                  <HelpCircle className="h-4 w-4" />
+                  Challenges
+                </Link>
+              )}
+              {user.role === "student" && !isExpired && (
                 <Link
                   to="/referrals"
                   className={`flex items-center gap-2 px-3 py-2 text-sm font-medium transition-colors rounded-md ${

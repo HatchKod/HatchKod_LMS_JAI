@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import { api } from "../lib/api";
@@ -10,7 +10,6 @@ import TodaysClasses from "../components/student/TodaysClasses";
 import { Avatar, AvatarFallback } from "../components/ui/avatar";
 import StatusPill from "../components/StatusPill";
 import { Users, Award, Target, Flame, Trophy, Video, BookOpen, ListChecks, Clock, ArrowRight, TrendingUp } from "lucide-react";
-import PaymentWall from "../components/PaymentWall";
 import { supabase } from "../lib/supabase";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -20,11 +19,11 @@ export default function StudentDashboard() {
   const [activeTab, setActiveTab] = useState("inprogress");
 
   // Dashboard Data Query
-  const { 
-    data, 
-    isLoading: isDashboardLoading, 
+  const {
+    data,
+    isLoading: isDashboardLoading,
     error: dashboardError,
-    refetch: refetchDashboard
+    refetch: refetchDashboard,
   } = useQuery({
     queryKey: ["dashboard", "student", user?.id],
     queryFn: async () => {
@@ -33,27 +32,6 @@ export default function StudentDashboard() {
     },
     enabled: !!user?.id,
     staleTime: 1000 * 60 * 2, // 2 minutes
-  });
-
-  // Payment Status Query
-  const { 
-    data: paymentStatus,
-    isLoading: isPaymentLoading 
-  } = useQuery({
-    queryKey: ["payment", "status", user?.id],
-    queryFn: async () => {
-      try {
-        const { data } = await api.get("/payment/status");
-        return data;
-      } catch (err) {
-        if (err.response?.status === 403 && err.response?.data?.detail?.code === "ACCESS_EXPIRED") {
-          return { effective_tier: "expired" };
-        }
-        throw err;
-      }
-    },
-    enabled: !!user?.id,
-    staleTime: 1000 * 60 * 10, // 10 minutes
   });
 
   useEffect(() => {
@@ -70,6 +48,24 @@ export default function StudentDashboard() {
     }
   }, [user?.id, queryClient]);
 
+  // Silently prefetch each enrolled course so first click lands instantly
+  useEffect(() => {
+    if (!data?.courses?.length) return;
+    const timers = data.courses.map(({ course }, index) =>
+      setTimeout(() => {
+        queryClient.prefetchQuery({
+          queryKey: ["course", course.id],
+          queryFn: async () => {
+            const { data: courseData } = await api.get(`/courses/${course.id}`);
+            return courseData;
+          },
+          staleTime: 1000 * 60 * 60,
+        });
+      }, index * 600)
+    );
+    return () => timers.forEach(clearTimeout);
+  }, [data, queryClient]);
+
   useEffect(() => {
     if (data && window.location.hash === "#courses-section") {
       const el = document.getElementById("courses-section");
@@ -80,11 +76,6 @@ export default function StudentDashboard() {
       }
     }
   }, [data]);
-
-  const isExpired = paymentStatus?.effective_tier === "expired" || user?.access_tier === "expired";
-  if (isExpired) {
-    return <PaymentWall />;
-  }
 
   if (isDashboardLoading && !data) {
     return (
@@ -163,6 +154,7 @@ export default function StudentDashboard() {
           <TodaysClasses />
         </div>
 
+        {/* CONTINUE LEARNING BLOCK — temporarily commented out
         {data.next_topic && activeTab === "inprogress" && (() => {
           const pending = (data.pending_submissions || []).find(s => s.topic_id === data.next_topic.topic.id);
           const nextSubtopicId = data.next_topic.subtopic?.id;
@@ -230,7 +222,7 @@ export default function StudentDashboard() {
               </Card>
             </div>
           );
-        })()}
+        })()} */}
 
         <div id="courses-section" className="flex items-center justify-between mb-6">
           <h2 className="text-xl font-bold tracking-tight text-slate-900">

@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { api, tokenStore, formatApiError } from "./api";
+import { queryClient } from "./queryClient";
 
 const AuthContext = createContext(null);
 
@@ -31,6 +32,7 @@ export function AuthProvider({ children }) {
   const login = async (email, password) => {
     try {
       const { data } = await api.post("/auth/login", { email, password });
+      queryClient.clear();
       tokenStore.set(data.token);
       setUser(data.user);
       return { ok: true, user: data.user };
@@ -51,6 +53,7 @@ export function AuthProvider({ children }) {
 
   const logout = async () => {
     try { await api.post("/auth/logout"); } catch {}
+    queryClient.clear();
     tokenStore.clear();
     setUser(null);
   };

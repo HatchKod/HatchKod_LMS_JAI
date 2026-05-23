@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, Navigate } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import { api } from "../lib/api";
 import { Lock, CheckCircle2, Folder, ChevronDown, ChevronUp, Circle, ArrowLeft } from "lucide-react";
@@ -8,16 +8,15 @@ import { useAuth } from "../lib/auth";
 import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from "../components/ui/tooltip";
 import { toast } from "sonner";
 import { supabase } from "../lib/supabase";
-import PaymentWall from "../components/PaymentWall";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 export default function CourseView() {
   const { id } = useParams();
   const { user } = useAuth();
-  const [course, setCourse] = useState(null);
+  const queryClient = useQueryClient();
   const [openModules, setOpenModules] = useState({});
   const [openTopics, setOpenTopics] = useState({});
   const [paymentStatus, setPaymentStatus] = useState(null);
-  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (user?.role !== "student") return;
@@ -33,44 +32,45 @@ export default function CourseView() {
     })();
   }, [user?.access_tier, user?.role]);
 
-  const load = async () => {
-    try {
-      setLoading(true);
+  const { data: course, isLoading: loading, isError } = useQuery({
+    queryKey: ["course", id],
+    queryFn: async () => {
       const { data } = await api.get(`/courses/${id}`);
-      setCourse(data);
-      
-      // Open all modules and topics by default on first load
-      if (data?.modules) {
-        const mOpen = {};
-        const tOpen = {};
-        data.modules.forEach(m => {
-          mOpen[m.id] = true;
-          (m.topics || []).forEach(t => { tOpen[t.id] = true; });
-        });
-        setOpenModules(mOpen);
-        setOpenTopics(tOpen);
-      }
-    } catch (err) {
-      console.error("Failed to load course:", err);
-      toast.error("Failed to load course content. Please try again later.");
-    } finally {
-      setLoading(false);
-    }
-  };
+      return data;
+    },
+    staleTime: 1000 * 60 * 60,
+  });
 
   useEffect(() => {
-    load();
+    if (isError) toast.error("Failed to load course content. Please try again later.");
+  }, [isError]);
+
+  useEffect(() => {
+    if (course?.modules) {
+      const mOpen = {};
+      const tOpen = {};
+      course.modules.forEach(m => {
+        mOpen[m.id] = true;
+        (m.topics || []).forEach(t => { tOpen[t.id] = true; });
+      });
+      setOpenModules(mOpen);
+      setOpenTopics(tOpen);
+    }
+  }, [course]);
+
+  useEffect(() => {
+    const invalidate = () => queryClient.invalidateQueries({ queryKey: ["course", id] });
     const channel = supabase.channel(`course_view_${id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'courses', filter: `id=eq.${id}` }, load)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'modules', filter: `course_id=eq.${id}` }, load)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'topics' }, load)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'subtopics' }, load)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'courses', filter: `id=eq.${id}` }, invalidate)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'modules', filter: `course_id=eq.${id}` }, invalidate)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'topics' }, invalidate)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'subtopics' }, invalidate)
       .subscribe();
     return () => supabase.removeChannel(channel);
-  }, [id]);
+  }, [id, queryClient]);
 
   if (user?.role === "student" && (paymentStatus?.effective_tier === "expired" || user?.access_tier === "expired")) {
-    return <PaymentWall />;
+    return <Navigate to="/billing" replace />;
   }
 
   if (loading && !course) {
