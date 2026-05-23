@@ -649,7 +649,7 @@ export default function SubtopicView() {
                               <FileUp className="h-4 w-4" />
                             </div>
                             <div className="font-bold text-sm">Upload File</div>
-                            <div className="text-[10px] text-slate-500 uppercase tracking-wider mt-1">ZIP, PDF, or Image</div>
+                            <div className="text-[10px] text-slate-500 uppercase tracking-wider mt-1">ZIP or PDF</div>
                           </button>
                         </div>
 
