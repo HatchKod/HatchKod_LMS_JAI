@@ -211,21 +211,6 @@ export default function StudentDashboard() {
             </div>
           </div>
 
-          {/* ── Stats Row ────────────────────────────────────────────── */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
-            <Stat label="Total XP" value={`${data.gamification?.total_xp || 0} XP`} Icon={Award} />
-            <Stat label="Current Level" value={`Lvl ${data.gamification?.level || 1}`} Icon={Target} subtitle={`Next: ${100 - ((data.gamification?.total_xp || 0) % 100)} XP`} />
-            <Stat label="Daily Streak" value={`${data.gamification?.streak || 0} ${data.gamification?.streak === 1 ? 'Day' : 'Days'}`} Icon={Flame} />
-            <Stat
-              label="Weekly Rank"
-              value={data.gamification?.weekly_rank === "N/A" ? "N/A" : `#${data.gamification?.weekly_rank}`}
-              Icon={Trophy}
-              link="/leaderboard"
-              linkText="View Board"
-            />
-            <Stat label="My Progress" value="View →" Icon={TrendingUp} link="/student/progress" linkText="Open Progress" />
-          </div>
-
           {/* ── Support Card (full-width, centered) ─────────────────── */}
           <div className="bg-[#0A0A0A] rounded-sm shadow-sm overflow-hidden">
 
