@@ -211,20 +211,27 @@ export default function StudentDashboard() {
             </div>
           </div>
 
-          {/* ── Support Card (full-width, centered) ─────────────────── */}
-          <div className="bg-[#0A0A0A] rounded-sm shadow-sm overflow-hidden">
+          {/* ── Support Card ─────────────────────────────────────────── */}
+          <div className="relative bg-[#0A0A0A] rounded-sm overflow-hidden border border-white/[0.06]">
+            {/* top accent bar */}
+            <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-[#194BFB] to-transparent opacity-70" />
 
             {/* Header */}
-            <div className="px-8 pt-8 pb-6 border-b border-white/5 text-center">
-              <div className="text-[10px] uppercase tracking-[0.22em] text-slate-500 font-bold mb-2">Support &amp; Help</div>
-              <h3 className="text-lg font-bold text-white mb-1">Need assistance? We're here for you</h3>
-              <p className="text-sm text-slate-400 max-w-md mx-auto">Our team typically assigns batches within 1–2 working days. Reach out any time if you need help.</p>
+            <div className="px-8 pt-10 pb-7 text-center">
+              <div className="inline-flex items-center gap-2 bg-[#194BFB]/10 border border-[#194BFB]/20 rounded-full px-3 py-1 mb-4">
+                <div className="h-1.5 w-1.5 rounded-full bg-[#194BFB] animate-pulse" />
+                <span className="text-[10px] uppercase tracking-[0.2em] text-[#194BFB] font-bold">Support &amp; Help</span>
+              </div>
+              <h3 className="text-xl font-bold text-white mb-2">Need assistance? We're here for you</h3>
+              <p className="text-sm text-slate-400 max-w-md mx-auto leading-relaxed">
+                Our team typically assigns batches within <span className="text-slate-200 font-medium">1–2 working days</span>. Reach out any time if you need help.
+              </p>
             </div>
 
             {/* Help topics */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 px-8 py-6 border-b border-white/5">
-              <div className="bg-white/[0.04] border border-white/8 rounded-sm p-4 flex items-start gap-3">
-                <div className="h-9 w-9 rounded-sm bg-amber-500/10 border border-amber-500/20 flex items-center justify-center flex-shrink-0">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 px-8 pb-7">
+              <div className="bg-white/[0.03] border border-white/[0.07] rounded-sm p-4 flex items-start gap-3 hover:border-amber-500/30 transition-colors">
+                <div className="h-9 w-9 rounded-sm bg-amber-500/10 border border-amber-500/25 flex items-center justify-center flex-shrink-0 mt-0.5">
                   <Users className="h-4 w-4 text-amber-400" />
                 </div>
                 <div>
@@ -234,8 +241,8 @@ export default function StudentDashboard() {
                   </p>
                 </div>
               </div>
-              <div className="bg-white/[0.04] border border-white/8 rounded-sm p-4 flex items-start gap-3">
-                <div className="h-9 w-9 rounded-sm bg-[#194BFB]/15 border border-[#194BFB]/25 flex items-center justify-center flex-shrink-0">
+              <div className="bg-white/[0.03] border border-white/[0.07] rounded-sm p-4 flex items-start gap-3 hover:border-[#194BFB]/30 transition-colors">
+                <div className="h-9 w-9 rounded-sm bg-[#194BFB]/10 border border-[#194BFB]/25 flex items-center justify-center flex-shrink-0 mt-0.5">
                   <MessageCircle className="h-4 w-4 text-[#194BFB]" />
                 </div>
                 <div>
@@ -247,33 +254,39 @@ export default function StudentDashboard() {
               </div>
             </div>
 
-            {/* Contact details — big & centered */}
+            {/* Divider */}
+            <div className="mx-8 border-t border-white/[0.06]" />
+
+            {/* Contact CTAs */}
             <div className="px-8 py-8">
-              <div className="text-[10px] uppercase tracking-widest text-slate-600 font-bold text-center mb-6">Contact Information</div>
-              <div className="flex flex-col sm:flex-row items-center justify-center gap-4 max-w-2xl mx-auto">
+              <div className="text-[10px] uppercase tracking-[0.22em] text-slate-600 font-bold text-center mb-5">Contact Us Directly</div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl mx-auto">
                 <a
                   href="mailto:support@hatchkod.in"
-                  className="flex items-center gap-4 px-8 py-5 rounded-sm bg-white/[0.04] border border-white/8 hover:bg-[#194BFB]/10 hover:border-[#194BFB]/30 transition-all group w-full sm:w-auto"
+                  className="group relative flex items-center gap-4 px-6 py-5 rounded-sm bg-[#194BFB]/10 border border-[#194BFB]/25 hover:bg-[#194BFB]/20 hover:border-[#194BFB]/50 transition-all overflow-hidden"
                 >
-                  <div className="h-12 w-12 rounded-sm bg-[#194BFB]/20 border border-[#194BFB]/30 flex items-center justify-center flex-shrink-0">
+                  <div className="absolute inset-0 bg-gradient-to-br from-[#194BFB]/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                  <div className="h-11 w-11 rounded-sm bg-[#194BFB]/20 border border-[#194BFB]/40 flex items-center justify-center flex-shrink-0">
                     <Mail className="h-5 w-5 text-[#194BFB]" />
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <div className="text-[10px] text-slate-500 uppercase tracking-wider font-bold mb-0.5">Email Us</div>
-                    <div className="text-base font-semibold text-slate-200 group-hover:text-white transition-colors">support@hatchkod.in</div>
+                    <div className="text-sm font-bold text-white truncate">support@hatchkod.in</div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">Typically replies in a few hours</div>
                   </div>
                 </a>
-                <div className="hidden sm:flex items-center justify-center h-10 w-8 text-slate-700 text-sm font-medium">or</div>
                 <a
                   href="tel:+919704897596"
-                  className="flex items-center gap-4 px-8 py-5 rounded-sm bg-white/[0.04] border border-white/8 hover:bg-[#194BFB]/10 hover:border-[#194BFB]/30 transition-all group w-full sm:w-auto"
+                  className="group relative flex items-center gap-4 px-6 py-5 rounded-sm bg-emerald-500/10 border border-emerald-500/25 hover:bg-emerald-500/20 hover:border-emerald-500/50 transition-all overflow-hidden"
                 >
-                  <div className="h-12 w-12 rounded-sm bg-[#194BFB]/20 border border-[#194BFB]/30 flex items-center justify-center flex-shrink-0">
-                    <Phone className="h-5 w-5 text-[#194BFB]" />
+                  <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                  <div className="h-11 w-11 rounded-sm bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center flex-shrink-0">
+                    <Phone className="h-5 w-5 text-emerald-400" />
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <div className="text-[10px] text-slate-500 uppercase tracking-wider font-bold mb-0.5">Call / WhatsApp</div>
-                    <div className="text-base font-semibold text-slate-200 group-hover:text-white transition-colors">+91 97048 97596</div>
+                    <div className="text-sm font-bold text-white">+91 97048 97596</div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">Available on WhatsApp too</div>
                   </div>
                 </a>
               </div>
