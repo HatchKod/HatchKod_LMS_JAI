@@ -160,3 +160,30 @@ pre,
 .markdown-content img {
   @apply max-w-[85%] md:max-w-[70%] max-h-[450px] w-auto object-contain rounded-sm border border-slate-200 shadow-sm my-8 mx-auto;
 }
+
+/* Dark background variant (e.g. task description header) */
+.markdown-content-dark h1,
+.markdown-content-dark h2,
+.markdown-content-dark h3 {
+  @apply font-bold mb-2 mt-4 text-white;
+}
+
+.markdown-content-dark p {
+  @apply mb-3 text-slate-300 leading-relaxed;
+}
+
+.markdown-content-dark ul {
+  @apply list-disc pl-5 mb-3 space-y-1;
+}
+
+.markdown-content-dark ol {
+  @apply list-decimal pl-5 mb-3 space-y-1;
+}
+
+.markdown-content-dark li {
+  @apply text-slate-300;
+}
+
+.markdown-content-dark strong {
+  @apply font-bold text-white;
+}
