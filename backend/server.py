@@ -1749,6 +1749,13 @@ async def submit_task(subtopic_id: str, payload: SubmissionIn, user: dict = Depe
             "reviewed_at": None,
             "mentor_id": mentor_id or existing[0].get("mentor_id"),
         }).eq("id", existing[0]["id"]).execute()
+        # Unlock the student immediately — XP comes later on mentor approval
+        supabase.table("student_progress").upsert({
+            "student_id": user["id"],
+            "subtopic_id": subtopic_id,
+            "is_completed": True,
+            "completed_at": iso(now_utc()),
+        }).execute()
         return get_single_or_none(supabase.table("submissions").select("*").eq("id", existing[0]["id"]))
 
     sid = str(uuid.uuid4())
@@ -1766,6 +1773,13 @@ async def submit_task(subtopic_id: str, payload: SubmissionIn, user: dict = Depe
         "reviewed_at": None,
     }
     supabase.table("submissions").insert(doc).execute()
+    # Unlock the student immediately — XP comes later on mentor approval
+    supabase.table("student_progress").upsert({
+        "student_id": user["id"],
+        "subtopic_id": subtopic_id,
+        "is_completed": True,
+        "completed_at": iso(now_utc()),
+    }).execute()
     return doc
 
 
@@ -1833,10 +1847,14 @@ async def complete_subtopic(subtopic_id: str, payload: TopicCompleteIn, user: di
 
 @api.delete("/subtopics/{subtopic_id}/complete")
 async def undo_complete_subtopic(subtopic_id: str, user: dict = Depends(require_roles("student"))):
-    # Only allow undoing if no approved submission exists
-    approved = get_single_or_none(supabase.table("submissions").select("id").eq("student_id", user["id"]).eq("subtopic_id", subtopic_id).eq("status", "approved"))
-    if approved:
-        raise HTTPException(400, "Cannot undo completion for an approved task.")
+    # Block undo if any submission is in-flight or already approved
+    blocked = get_single_or_none(
+        supabase.table("submissions").select("id")
+        .eq("student_id", user["id"]).eq("subtopic_id", subtopic_id)
+        .in_("status", ["pending", "approved"])
+    )
+    if blocked:
+        raise HTTPException(400, "Cannot undo completion for a submitted task.")
         
     supabase.table("student_progress").delete().eq("student_id", user["id"]).eq("subtopic_id", subtopic_id).execute()
     supabase.table("subtopic_completions").delete().eq("student_id", user["id"]).eq("subtopic_id", subtopic_id).execute()
@@ -1937,6 +1955,10 @@ async def review_submission(
         raise HTTPException(404, "Submission not found")
     if payload.status == "rework" and not payload.feedback.strip():
         raise HTTPException(400, "Feedback is required when requesting rework")
+    # Capture before update — progress is now set at submission time, so
+    # already_done would always be True; instead guard on prior approval status.
+    already_approved = sub["status"] == "approved"
+
     update = {
         "status": payload.status,
         "feedback": payload.feedback,
@@ -1945,17 +1967,13 @@ async def review_submission(
     }
     supabase.table("submissions").update(update).eq("id", submission_id).execute()
     if payload.status == "approved":
-        already_done = get_single_or_none(
-            supabase.table("student_progress").select("is_completed")
-            .eq("student_id", sub["student_id"]).eq("subtopic_id", sub["subtopic_id"]).eq("is_completed", True)
-        )
         supabase.table("student_progress").upsert({
             "student_id": sub["student_id"],
             "subtopic_id": sub["subtopic_id"],
             "is_completed": True,
             "completed_at": iso(now_utc()),
         }).execute()
-        if not already_done:
+        if not already_approved:
             try:
                 award_xp(sub["student_id"], "project_approved")
             except Exception as e:

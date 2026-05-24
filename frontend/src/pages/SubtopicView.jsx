@@ -199,10 +199,13 @@ export default function SubtopicView() {
     setBusy(true);
     try {
       await api.post(`/subtopics/${id}/submit`, { submission_url: finalUrl, submission_text: text });
-      toast.success("Submitted! Mentor will review shortly.");
+      toast.success("Submitted! You can proceed — XP will be awarded after mentor review.");
+      setIsCompleted(true);
       setIsEditing(false);
       setSubmissionError("");
       setFile(null);
+      const courseId = data?.course?.id;
+      if (courseId) queryClient.invalidateQueries({ queryKey: ["course", courseId] });
       await load();
     } catch (e) {
       setSubmissionError(formatApiError(e.response?.data?.detail) || "Submission failed");
@@ -607,18 +610,29 @@ export default function SubtopicView() {
 
         {/* Completion Banner */}
         {isStudent && isCompleted && (
-          <div className="bg-green-50 border border-green-200 rounded-sm p-3 mb-6 flex items-center gap-2">
-            <CheckCircle className="text-green-500 h-4 w-4 shrink-0" />
-            <span className="text-sm text-green-700">
-              You completed this subtopic{completedAt ? ` on ${fmtDate(completedAt, { day: "numeric", month: "short", year: "numeric" })}` : ""}
-            </span>
-            <button
-              onClick={handleUndoComplete}
-              className="ml-auto text-xs text-slate-400 hover:text-red-400 transition-colors"
-            >
-              Undo completion
-            </button>
-          </div>
+          task?.task_type === 'project' && submission && submission.status !== 'approved' ? (
+            <div className="bg-amber-50 border border-amber-200 rounded-sm p-3 mb-6 flex items-center gap-2">
+              <Clock className="text-amber-500 h-4 w-4 shrink-0" />
+              <span className="text-sm text-amber-700">
+                Submitted — awaiting mentor review. XP will be awarded on approval.
+              </span>
+            </div>
+          ) : (
+            <div className="bg-green-50 border border-green-200 rounded-sm p-3 mb-6 flex items-center gap-2">
+              <CheckCircle className="text-green-500 h-4 w-4 shrink-0" />
+              <span className="text-sm text-green-700">
+                You completed this subtopic{completedAt ? ` on ${fmtDate(completedAt, { day: "numeric", month: "short", year: "numeric" })}` : ""}
+              </span>
+              {!task && (
+                <button
+                  onClick={handleUndoComplete}
+                  className="ml-auto text-xs text-slate-400 hover:text-red-400 transition-colors"
+                >
+                  Undo completion
+                </button>
+              )}
+            </div>
+          )
         )}
 
         {mode === 'content' ? (
@@ -1048,7 +1062,7 @@ export default function SubtopicView() {
                       <Lock className="h-3 w-3" />
                       {task?.task_type === 'coding'
                         ? 'Pass all test cases to unlock next subtopic'
-                        : 'Submit & get approval to unlock next subtopic'}
+                        : 'Submit your assignment to proceed to next subtopic'}
                     </TooltipContent>
                   )}
                 </Tooltip>
