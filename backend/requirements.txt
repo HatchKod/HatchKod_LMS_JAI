@@ -14,4 +14,4 @@ boto3
 redis
 fastapi-cache2
 pendulum
-
+jinja2>=3.1.0
