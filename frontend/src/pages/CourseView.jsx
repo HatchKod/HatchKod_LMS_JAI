@@ -38,7 +38,7 @@ export default function CourseView() {
       const { data } = await api.get(`/courses/${id}`);
       return data;
     },
-    staleTime: 1000 * 60 * 60,
+    staleTime: 1000 * 60 * 5,
   });
 
   useEffect(() => {

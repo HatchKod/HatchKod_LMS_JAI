@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, formatApiError } from "../lib/api";
 import { fmtDate } from "../lib/dateUtils";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
@@ -27,6 +28,7 @@ export default function SubtopicView() {
   const mode = searchParams.get("mode") || "content";
   const classId = searchParams.get("classId");
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [url, setUrl] = useState("");
@@ -123,6 +125,11 @@ export default function SubtopicView() {
   }, [id, user?.role]);
 
   useEffect(() => {
+    setData(null);
+    setCode("");
+    setCodeResults(null);
+    setIsCompleted(false);
+    setCompletedAt(null);
     load();
 
     const channel = supabase.channel(`subtopic_view_${id}`)
@@ -232,6 +239,7 @@ export default function SubtopicView() {
       }
       setIsCompleted(true);
       setCompletedAt(new Date().toISOString());
+      if (course?.id) queryClient.invalidateQueries({ queryKey: ["course", course.id] });
       if (data.next_subtopic) {
         navigate(`/subtopic/${data.next_subtopic.id}`);
       } else {
@@ -248,6 +256,7 @@ export default function SubtopicView() {
       await api.delete(`/subtopics/${id}/complete`);
       setIsCompleted(false);
       setCompletedAt(null);
+      if (course?.id) queryClient.invalidateQueries({ queryKey: ["course", course.id] });
       load();
     } catch {
       toast.error("Failed to undo completion");
@@ -285,6 +294,7 @@ export default function SubtopicView() {
       if (res.data.all_passed) {
         setIsCompleted(true);
         setCompletedAt(new Date().toISOString());
+        if (course?.id) queryClient.invalidateQueries({ queryKey: ["course", course.id] });
         if (res.data.gamification) {
           toast.success(`All tests passed! +${res.data.gamification.xp_earned} XP earned! 🔥`, {
             description: `Level ${res.data.gamification.level} · ${res.data.gamification.streak} day streak`,

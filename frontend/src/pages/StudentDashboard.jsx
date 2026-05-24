@@ -60,7 +60,7 @@ export default function StudentDashboard() {
             const { data: courseData } = await api.get(`/courses/${course.id}`);
             return courseData;
           },
-          staleTime: 1000 * 60 * 60,
+          staleTime: 1000 * 60 * 5,
         });
       }, index * 600)
     );

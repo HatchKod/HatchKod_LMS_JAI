@@ -1937,17 +1937,21 @@ async def review_submission(
     }
     supabase.table("submissions").update(update).eq("id", submission_id).execute()
     if payload.status == "approved":
+        already_done = get_single_or_none(
+            supabase.table("student_progress").select("is_completed")
+            .eq("student_id", sub["student_id"]).eq("subtopic_id", sub["subtopic_id"]).eq("is_completed", True)
+        )
         supabase.table("student_progress").upsert({
             "student_id": sub["student_id"],
             "subtopic_id": sub["subtopic_id"],
             "is_completed": True,
             "completed_at": iso(now_utc()),
         }).execute()
-        # Award XP for project approval - wrapped in try/except to prevent blocking main flow
-        try:
-            award_xp(sub["student_id"], "project_approved")
-        except Exception as e:
-            logger.error(f"Error awarding XP: {e}")
+        if not already_done:
+            try:
+                award_xp(sub["student_id"], "project_approved")
+            except Exception as e:
+                logger.error(f"Error awarding XP: {e}")
     return get_single_or_none(supabase.table("submissions").select("*").eq("id", submission_id))
 
 
@@ -5005,7 +5009,6 @@ async def get_courses(user: dict = Depends(require_active_access)):
     return courses
 
 @api.get("/courses/{course_id}")
-@cache(expire=3600)
 async def get_course(course_id: str, user: dict = Depends(require_active_access)):
     # ... (rest of get_course logic)
     # Guard against invalid UUID values like "undefined" from bad DB data
@@ -5053,10 +5056,10 @@ async def get_course(course_id: str, user: dict = Depends(require_active_access)
     # 2. Fetch topics and student data in parallel safely
     import asyncio
     async def fetch_parallel():
-        t_task = asyncio.to_thread(lambda: create_client(SUPABASE_URL, SUPABASE_KEY).table("topics").select("*").in_("module_id", module_ids).execute().data or [])
+        t_task = asyncio.to_thread(lambda: supabase.table("topics").select("*").in_("module_id", module_ids).execute().data or [])
         if user["role"] == "student":
-            p_task = asyncio.to_thread(lambda: create_client(SUPABASE_URL, SUPABASE_KEY).table("student_progress").select("*").eq("student_id", user["id"]).execute().data or [])
-            sub_task = asyncio.to_thread(lambda: create_client(SUPABASE_URL, SUPABASE_KEY).table("submissions").select("*").eq("student_id", user["id"]).execute().data or [])
+            p_task = asyncio.to_thread(lambda: supabase.table("student_progress").select("*").eq("student_id", user["id"]).execute().data or [])
+            sub_task = asyncio.to_thread(lambda: supabase.table("submissions").select("*").eq("student_id", user["id"]).execute().data or [])
             return await asyncio.gather(t_task, p_task, sub_task)
         else:
             return await asyncio.gather(t_task)
