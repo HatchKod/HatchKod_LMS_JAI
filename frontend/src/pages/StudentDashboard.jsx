@@ -10,7 +10,7 @@ import { Button } from "../components/ui/button";
 import TodaysClasses from "../components/student/TodaysClasses";
 import { Avatar, AvatarFallback } from "../components/ui/avatar";
 import StatusPill from "../components/StatusPill";
-import { Users, Award, Target, Flame, Trophy, Video, BookOpen, ListChecks, Clock, ArrowRight, TrendingUp } from "lucide-react";
+import { Users, Award, Target, Flame, Trophy, Video, BookOpen, ListChecks, Clock, ArrowRight, TrendingUp, Mail, Phone, CheckCircle2, Lock, MessageCircle } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -60,12 +60,40 @@ export default function StudentDashboard() {
             const { data: courseData } = await api.get(`/courses/${course.id}`);
             return courseData;
           },
-          staleTime: 1000 * 60 * 60,
+          staleTime: 1000 * 60 * 5,
         });
       }, index * 600)
     );
     return () => timers.forEach(clearTimeout);
   }, [data, queryClient]);
+
+  // Silently prefetch progress page data so "View Progress" click is instant
+  useEffect(() => {
+    if (!user?.id || !data) return;
+    const timer = setTimeout(async () => {
+      try {
+        let batches = queryClient.getQueryData(["enrolled-batches", user.id]);
+        if (!batches) {
+          const { data: batchData } = await api.get("/students/me/enrolled-batches");
+          batches = batchData;
+          queryClient.setQueryData(["enrolled-batches", user.id], batchData);
+        }
+        batches?.forEach((b, i) => {
+          setTimeout(() => {
+            queryClient.prefetchQuery({
+              queryKey: ["student-progress", user.id, b.batch_id],
+              queryFn: async () => {
+                const { data: pd } = await api.get(`/students/${user.id}/progress?batchId=${b.batch_id}`);
+                return pd;
+              },
+              staleTime: 1000 * 60 * 3,
+            });
+          }, i * 800);
+        });
+      } catch { /* silent — prefetch failure is not user-facing */ }
+    }, 2000); // wait 2s after dashboard renders before background fetch
+    return () => clearTimeout(timer);
+  }, [data, user?.id, queryClient]);
 
   useEffect(() => {
     if (data && window.location.hash === "#courses-section") {
@@ -113,6 +141,162 @@ export default function StudentDashboard() {
   }
 
   if (!data) return null;
+
+  if (!user?.batch_id) {
+    return (
+      <div className="min-h-screen bg-[#F8FAFC]" data-testid="student-dashboard">
+        <Navbar />
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 py-8 fade-in">
+
+          {/* ── Hero Banner ─────────────────────────────────────────── */}
+          <div className="relative bg-[#0A0A0A] rounded-sm overflow-hidden mb-8 shadow-sm">
+            {/* dot-grid texture */}
+            <div className="absolute inset-0 opacity-[0.04]"
+              style={{ backgroundImage: 'radial-gradient(circle, white 1px, transparent 1px)', backgroundSize: '28px 28px' }} />
+            {/* blue ambient glow */}
+            <div className="absolute -top-20 -right-20 w-96 h-96 bg-[#194BFB]/20 rounded-full blur-3xl pointer-events-none" />
+
+            <div className="relative p-8 md:p-12">
+              {/* Status badge */}
+              <div className="inline-flex items-center gap-2 bg-amber-500/10 border border-amber-500/25 rounded-full px-4 py-1.5 mb-6">
+                <div className="h-2 w-2 rounded-full bg-amber-400 animate-pulse" />
+                <span className="text-xs font-semibold text-amber-400 tracking-wide">Awaiting Batch Assignment</span>
+              </div>
+
+              <h1 className="text-3xl md:text-4xl font-bold text-white mb-3 font-['Outfit']" data-testid="dashboard-heading">
+                Welcome to HatchKod, {user?.name?.split(" ")[0] || "there"}! 👋
+              </h1>
+              <p className="text-slate-400 text-sm leading-relaxed max-w-xl mb-10">
+                Your account is active and you're all set. An admin will assign you to a batch shortly —
+                once that happens, you'll have full access to your courses, Codepad, and Challenges.
+              </p>
+
+              {/* Inline stepper */}
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-0">
+                {/* Step 1 */}
+                <div className="flex sm:flex-col items-center sm:items-center gap-3 sm:gap-2 flex-1">
+                  <div className="h-10 w-10 rounded-full bg-emerald-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-emerald-500/30">
+                    <CheckCircle2 className="h-5 w-5 text-white" />
+                  </div>
+                  <div className="sm:text-center">
+                    <div className="text-xs font-bold text-emerald-400">Account Created</div>
+                    <div className="text-[11px] text-slate-500">You're registered</div>
+                  </div>
+                </div>
+                {/* Connector */}
+                <div className="hidden sm:block flex-1 h-px bg-gradient-to-r from-emerald-500/50 to-amber-400/50 mx-3" />
+                {/* Step 2 */}
+                <div className="flex sm:flex-col items-center sm:items-center gap-3 sm:gap-2 flex-1">
+                  <div className="h-10 w-10 rounded-full border-2 border-amber-400 bg-amber-400/10 flex items-center justify-center flex-shrink-0">
+                    <div className="h-3 w-3 rounded-full bg-amber-400 animate-pulse" />
+                  </div>
+                  <div className="sm:text-center">
+                    <div className="text-xs font-bold text-amber-400">Batch Assignment</div>
+                    <div className="text-[11px] text-slate-500">Admin is setting this up</div>
+                  </div>
+                </div>
+                {/* Connector */}
+                <div className="hidden sm:block flex-1 h-px bg-slate-700 mx-3" />
+                {/* Step 3 */}
+                <div className="flex sm:flex-col items-center sm:items-center gap-3 sm:gap-2 flex-1">
+                  <div className="h-10 w-10 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center flex-shrink-0">
+                    <Lock className="h-4 w-4 text-slate-600" />
+                  </div>
+                  <div className="sm:text-center">
+                    <div className="text-xs font-bold text-slate-500">Start Learning</div>
+                    <div className="text-[11px] text-slate-600">Full access unlocks here</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* ── Support Card ─────────────────────────────────────────── */}
+          <div className="relative bg-[#0A0A0A] rounded-sm overflow-hidden border border-white/[0.06]">
+            {/* top accent bar */}
+            <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-[#194BFB] to-transparent opacity-70" />
+
+            {/* Header */}
+            <div className="px-8 pt-10 pb-7 text-center">
+              <div className="inline-flex items-center gap-2 bg-[#194BFB]/10 border border-[#194BFB]/20 rounded-full px-3 py-1 mb-4">
+                <div className="h-1.5 w-1.5 rounded-full bg-[#194BFB] animate-pulse" />
+                <span className="text-[10px] uppercase tracking-[0.2em] text-[#194BFB] font-bold">Support &amp; Help</span>
+              </div>
+              <h3 className="text-xl font-bold text-white mb-2">Need assistance? We're here for you</h3>
+              <p className="text-sm text-slate-400 max-w-md mx-auto leading-relaxed">
+                Our team typically assigns batches within <span className="text-slate-200 font-medium">1–2 working days</span>. Reach out any time if you need help.
+              </p>
+            </div>
+
+            {/* Help topics */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 px-8 pb-7">
+              <div className="bg-white/[0.03] border border-white/[0.07] rounded-sm p-4 flex items-start gap-3 hover:border-amber-500/30 transition-colors">
+                <div className="h-9 w-9 rounded-sm bg-amber-500/10 border border-amber-500/25 flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <Users className="h-4 w-4 text-amber-400" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-white mb-1">Batch not assigned yet?</p>
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    If it's been more than 2 working days, message us and we'll check your status immediately.
+                  </p>
+                </div>
+              </div>
+              <div className="bg-white/[0.03] border border-white/[0.07] rounded-sm p-4 flex items-start gap-3 hover:border-[#194BFB]/30 transition-colors">
+                <div className="h-9 w-9 rounded-sm bg-[#194BFB]/10 border border-[#194BFB]/25 flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <MessageCircle className="h-4 w-4 text-[#194BFB]" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-white mb-1">Need Payment Support?</p>
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    Made a manual bank transfer or ran into a payment issue? We'll manually activate your access.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Divider */}
+            <div className="mx-8 border-t border-white/[0.06]" />
+
+            {/* Contact CTAs */}
+            <div className="px-8 py-8">
+              <div className="text-[10px] uppercase tracking-[0.22em] text-slate-600 font-bold text-center mb-5">Contact Us Directly</div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl mx-auto">
+                <a
+                  href="mailto:support@hatchkod.in"
+                  className="group relative flex items-center gap-4 px-6 py-5 rounded-sm bg-[#194BFB]/10 border border-[#194BFB]/25 hover:bg-[#194BFB]/20 hover:border-[#194BFB]/50 transition-all overflow-hidden"
+                >
+                  <div className="absolute inset-0 bg-gradient-to-br from-[#194BFB]/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                  <div className="h-11 w-11 rounded-sm bg-[#194BFB]/20 border border-[#194BFB]/40 flex items-center justify-center flex-shrink-0">
+                    <Mail className="h-5 w-5 text-[#194BFB]" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-[10px] text-slate-500 uppercase tracking-wider font-bold mb-0.5">Email Us</div>
+                    <div className="text-sm font-bold text-white truncate">support@hatchkod.in</div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">Typically replies in a few hours</div>
+                  </div>
+                </a>
+                <a
+                  href="tel:+919704897596"
+                  className="group relative flex items-center gap-4 px-6 py-5 rounded-sm bg-emerald-500/10 border border-emerald-500/25 hover:bg-emerald-500/20 hover:border-emerald-500/50 transition-all overflow-hidden"
+                >
+                  <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                  <div className="h-11 w-11 rounded-sm bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center flex-shrink-0">
+                    <Phone className="h-5 w-5 text-emerald-400" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-[10px] text-slate-500 uppercase tracking-wider font-bold mb-0.5">Call / WhatsApp</div>
+                    <div className="text-sm font-bold text-white">+91 97048 97596</div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">Available on WhatsApp too</div>
+                  </div>
+                </a>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const inprogressCourses = data.courses.filter(c => c.progress < 100);
   const completedCourses = data.courses.filter(c => c.progress === 100);
@@ -244,7 +428,7 @@ export default function StudentDashboard() {
         </div>
 
         <div className="grid grid-cols-1 gap-6">
-          {currentCourses.map(({ course, progress, completed_topics, total_topics, module_count }) => (
+          {currentCourses.map(({ course, progress, completed_topics, total_topics, module_count, mentor: courseMentor }) => (
             <Card key={course.id} className="rounded-sm border-border bg-white p-0 overflow-hidden shadow-sm hover:shadow-md transition-shadow group" data-testid={`course-card-${course.id}`}>
               <div className="flex flex-col md:flex-row">
                 {/* Left Side: Course Info */}
@@ -270,10 +454,10 @@ export default function StudentDashboard() {
                       <div className="flex items-center gap-2">
                         <Avatar className="h-6 w-6">
                           <AvatarFallback className="bg-slate-100 text-slate-600 text-[8px] font-bold">
-                            {data.mentor ? data.mentor.name.split(" ").map(n => n[0]).join("") : "??"}
+                            {courseMentor ? courseMentor.name.split(" ").map(n => n[0]).join("") : "??"}
                           </AvatarFallback>
                         </Avatar>
-                        <span className="text-xs font-semibold text-slate-700">{data.mentor?.name || "Unassigned"}</span>
+                        <span className="text-xs font-semibold text-slate-700">{courseMentor?.name || "Unassigned"}</span>
                       </div>
                     </div>
                     <div className="space-y-1">

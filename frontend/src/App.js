@@ -82,13 +82,13 @@ export default function App() {
               } />
 
               <Route path="/playground" element={
-                <ProtectedRoute><PlaygroundPage /></ProtectedRoute>
+                <ProtectedRoute requiresBatch><PlaygroundPage /></ProtectedRoute>
               } />
               <Route path="/problems" element={
-                <ProtectedRoute><ProblemLibraryPage /></ProtectedRoute>
+                <ProtectedRoute requiresBatch><ProblemLibraryPage /></ProtectedRoute>
               } />
               <Route path="/problems/:id" element={
-                <ProtectedRoute><ProblemDetailPage /></ProtectedRoute>
+                <ProtectedRoute requiresBatch><ProblemDetailPage /></ProtectedRoute>
               } />
               <Route path="/admin/problems" element={
                 <ProtectedRoute roles={["admin"]}><ProblemManagementPage /></ProtectedRoute>

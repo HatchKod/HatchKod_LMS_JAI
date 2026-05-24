@@ -84,6 +84,7 @@ export default function Navbar({ unreadCount }) {
   };
 
   const isExpired = user?.access_tier === "expired";
+  const isNoBatch = user?.role === "student" && !user?.batch_id;
   const isActive = (path) => location.pathname === path;
 
   return (
@@ -111,7 +112,7 @@ export default function Navbar({ unreadCount }) {
                 <LayoutDashboard className="h-4 w-4" />
                 Dashboard
               </Link>
-              {!isExpired && (
+              {!isExpired && !isNoBatch && (
                 <Link
                   to="/playground"
                   className={`flex items-center gap-2 px-3 py-2 text-sm font-medium transition-colors rounded-md ${
@@ -124,7 +125,7 @@ export default function Navbar({ unreadCount }) {
                   Codepad
                 </Link>
               )}
-              {!isExpired && (
+              {!isExpired && !isNoBatch && (
                 <Link
                   to="/problems"
                   className={`flex items-center gap-2 px-3 py-2 text-sm font-medium transition-colors rounded-md ${

@@ -1,26 +1,27 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
-import { 
-  ChevronLeft, 
-  Settings, 
-  Plus, 
-  GripVertical, 
-  Pencil, 
-  Trash2, 
-  Play, 
-  FileText, 
-  CheckCircle2, 
-  Clock, 
-  Save, 
-  Eye, 
+import {
+  ChevronLeft,
+  Settings,
+  Plus,
+  GripVertical,
+  Pencil,
+  Trash2,
+  Play,
+  FileText,
+  CheckCircle2,
+  Clock,
+  Save,
+  Eye,
   EyeOff,
   ChevronRight,
   MoreVertical,
   Layers,
   Layout,
   Video,
-  Code
+  Code,
+  Terminal
 } from "lucide-react";
 import { toast } from "sonner";
 import { api, formatApiError } from "../lib/api";
@@ -838,29 +839,21 @@ export default function AdminCourseEditor() {
 }
 
 function TaskEditor({ subtopicId }) {
-  const [task, setTask] = useState({
-    description: "",
-    instructions: "",
-    expected_output: "",
-    difficulty: "easy"
-  });
+  const EMPTY_TASK = { description: "", instructions: "", expected_output: "", difficulty: "easy", task_type: "project", language: "java" };
+  const [task, setTask] = useState(EMPTY_TASK);
+  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
 
   const fetchTask = useCallback(async () => {
+    setLoading(true);
     try {
       const res = await api.get(`/subtopics/${subtopicId}`);
-      if (res.data.task) {
-        setTask(res.data.task);
-      } else {
-        setTask({
-          description: "",
-          instructions: "",
-          expected_output: "",
-          difficulty: "easy"
-        });
-      }
-    } catch (e) {
+      setTask(res.data.task ? { ...EMPTY_TASK, ...res.data.task } : EMPTY_TASK);
+    } catch {
       toast.error("Failed to load task");
+      setTask(EMPTY_TASK);
+    } finally {
+      setLoading(false);
     }
   }, [subtopicId]);
 
@@ -870,23 +863,64 @@ function TaskEditor({ subtopicId }) {
     setBusy(true);
     try {
       const res = await api.post(`/admin/subtopics/${subtopicId}/task`, task);
-      setTask(res.data);
-      toast.success("Task updated");
-    } catch (e) {
+      setTask(prev => ({ ...EMPTY_TASK, ...prev, ...res.data }));
+      toast.success("Task saved");
+    } catch {
       toast.error("Failed to save task");
     } finally {
       setBusy(false);
     }
   };
 
+  if (loading) return <div className="py-12 text-center text-slate-400 font-bold text-sm animate-pulse">Loading task configuration...</div>;
+
   return (
     <div className="space-y-8">
+      {/* Task Type */}
+      <div className="space-y-3">
+        <Label className="text-[10px] uppercase font-bold tracking-widest text-slate-400">Task Type</Label>
+        <div className="grid grid-cols-2 gap-3">
+          {[
+            { value: "project", label: "Project / Manual Review", icon: FileText, hint: "Student submits a GitHub link or file. Mentor reviews and approves manually." },
+            { value: "coding", label: "Coding / Auto-Graded", icon: Code, hint: "Student writes code in an embedded editor. Judge0 runs test cases. All pass → auto-complete." },
+          ].map(({ value, label, icon: Icon, hint }) => (
+            <button
+              key={value}
+              onClick={() => setTask(t => ({ ...t, task_type: value }))}
+              className={`p-4 rounded-sm border-2 text-left transition-all ${task.task_type === value ? "border-[#194BFB] bg-[#194BFB]/5" : "border-slate-200 hover:border-slate-300"}`}
+            >
+              <div className={`flex items-center gap-2 font-bold text-sm mb-1 ${task.task_type === value ? "text-[#194BFB]" : "text-slate-600"}`}>
+                <Icon className="h-4 w-4" /> {label}
+              </div>
+              <p className="text-[10px] text-slate-400 leading-relaxed">{hint}</p>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Language — coding only */}
+      {task.task_type === "coding" && (
+        <div className="space-y-3">
+          <Label className="text-[10px] uppercase font-bold tracking-widest text-slate-400">Programming Language</Label>
+          <Select value={task.language || "java"} onValueChange={(v) => setTask(t => ({ ...t, language: v }))}>
+            <SelectTrigger className="w-52 h-10 rounded-sm"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="java">Java</SelectItem>
+              <SelectItem value="python">Python</SelectItem>
+              <SelectItem value="javascript">JavaScript</SelectItem>
+              <SelectItem value="cpp">C++</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+
+      {/* Description */}
       <div className="space-y-3">
         <Label className="text-[10px] uppercase font-bold tracking-widest text-slate-400">Problem Description</Label>
-        <Textarea 
+        <Textarea
           value={task.description}
-          onChange={(e) => setTask({ ...task, description: e.target.value })}
-          placeholder="What should the student build?"
+          onChange={(e) => setTask(t => ({ ...t, description: e.target.value }))}
+          placeholder="What should the student build or implement?"
           className="min-h-[120px] rounded-sm"
         />
       </div>
@@ -894,39 +928,327 @@ function TaskEditor({ subtopicId }) {
       <div className="grid grid-cols-2 gap-8">
         <div className="space-y-3">
           <Label className="text-[10px] uppercase font-bold tracking-widest text-slate-400">Instructions</Label>
-          <Textarea 
+          <Textarea
             value={task.instructions}
-            onChange={(e) => setTask({ ...task, instructions: e.target.value })}
+            onChange={(e) => setTask(t => ({ ...t, instructions: e.target.value }))}
             placeholder="Step by step guide..."
             className="min-h-[150px] rounded-sm"
           />
         </div>
         <div className="space-y-3">
-          <Label className="text-[10px] uppercase font-bold tracking-widest text-slate-400">Expected Result</Label>
-          <Textarea 
+          <Label className="text-[10px] uppercase font-bold tracking-widest text-slate-400">Expected Result / Example</Label>
+          <Textarea
             value={task.expected_output}
-            onChange={(e) => setTask({ ...task, expected_output: e.target.value })}
-            placeholder="Example output or code snippet..."
+            onChange={(e) => setTask(t => ({ ...t, expected_output: e.target.value }))}
+            placeholder="Example output or reference code..."
             className="min-h-[150px] font-mono text-xs rounded-sm"
           />
         </div>
       </div>
 
       <div className="flex items-center justify-between pt-6 border-t border-slate-100">
-         <div className="flex items-center gap-3">
-            <Label className="text-[10px] uppercase font-bold text-slate-400">Difficulty</Label>
-            <Select value={task.difficulty} onValueChange={(v) => setTask({ ...task, difficulty: v })}>
-              <SelectTrigger className="w-32 h-9 rounded-sm"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="easy">Easy</SelectItem>
-                <SelectItem value="medium">Medium</SelectItem>
-                <SelectItem value="hard">Hard</SelectItem>
-              </SelectContent>
-            </Select>
-         </div>
-         <Button onClick={save} disabled={busy} className="bg-[#194BFB] hover:bg-blue-700 text-white px-8 font-bold rounded-sm h-10">
-           {busy ? "Saving..." : "Update Task Configuration"}
-         </Button>
+        <div className="flex items-center gap-3">
+          <Label className="text-[10px] uppercase font-bold text-slate-400">Difficulty</Label>
+          <Select value={task.difficulty} onValueChange={(v) => setTask(t => ({ ...t, difficulty: v }))}>
+            <SelectTrigger className="w-32 h-9 rounded-sm"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="easy">Easy</SelectItem>
+              <SelectItem value="medium">Medium</SelectItem>
+              <SelectItem value="hard">Hard</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <Button onClick={save} disabled={busy} className="bg-[#194BFB] hover:bg-blue-700 text-white px-8 font-bold rounded-sm h-10">
+          {busy ? "Saving..." : "Save Task"}
+        </Button>
+      </div>
+
+      {/* Test Case Manager — only after task is saved as coding type */}
+      {task.id && task.task_type === "coding" && (
+        <TestCaseManager taskId={task.id} />
+      )}
+    </div>
+  );
+}
+
+function TestCaseManager({ taskId }) {
+  const [testCases, setTestCases] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [adding, setAdding] = useState(false);
+  const [newCase, setNewCase] = useState({ input: "", expected_output: "", is_sample: true });
+  const [savingNew, setSavingNew] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+
+  const loadCases = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await api.get(`/tasks/${taskId}/test-cases`);
+      setTestCases(res.data || []);
+    } catch {
+      toast.error("Failed to load test cases");
+    } finally {
+      setLoading(false);
+    }
+  }, [taskId]);
+
+  useEffect(() => { loadCases(); }, [loadCases]);
+
+  const addCase = async () => {
+    if (!newCase.expected_output.trim()) { toast.error("Expected output is required"); return; }
+    setSavingNew(true);
+    try {
+      const res = await api.post(`/tasks/${taskId}/test-cases`, { ...newCase, order_index: testCases.length });
+      setTestCases(prev => [...prev, res.data]);
+      setNewCase({ input: "", expected_output: "", is_sample: true });
+      setAdding(false);
+      toast.success("Test case added");
+    } catch {
+      toast.error("Failed to add test case");
+    } finally {
+      setSavingNew(false);
+    }
+  };
+
+  const updateCase = async (tc) => {
+    try {
+      const res = await api.put(`/task-test-cases/${tc.id}`, {
+        input: tc.input,
+        expected_output: tc.expected_output,
+        is_sample: tc.is_sample,
+        order_index: tc.order_index,
+      });
+      setTestCases(prev => prev.map(c => c.id === tc.id ? res.data : c));
+      setEditingId(null);
+      toast.success("Test case updated");
+    } catch {
+      toast.error("Failed to update test case");
+    }
+  };
+
+  const deleteCase = async (id) => {
+    if (!confirm("Delete this test case?")) return;
+    try {
+      await api.delete(`/task-test-cases/${id}`);
+      setTestCases(prev => prev.filter(c => c.id !== id));
+      toast.success("Test case deleted");
+    } catch {
+      toast.error("Failed to delete test case");
+    }
+  };
+
+  const toggleSample = async (tc) => {
+    const updated = { ...tc, is_sample: !tc.is_sample };
+    setTestCases(prev => prev.map(c => c.id === tc.id ? updated : c));
+    try {
+      await api.put(`/task-test-cases/${tc.id}`, {
+        input: updated.input,
+        expected_output: updated.expected_output,
+        is_sample: updated.is_sample,
+        order_index: updated.order_index,
+      });
+    } catch {
+      toast.error("Failed to update");
+      setTestCases(prev => prev.map(c => c.id === tc.id ? tc : c));
+    }
+  };
+
+  return (
+    <div className="space-y-4 pt-8 border-t-2 border-dashed border-slate-200">
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="flex items-center gap-2">
+            <Terminal className="h-4 w-4 text-[#194BFB]" />
+            <span className="text-sm font-extrabold text-slate-900 uppercase tracking-widest">Test Cases</span>
+            <span className="bg-slate-100 text-slate-600 text-[10px] font-bold px-2 py-0.5 rounded-full">{testCases.length}</span>
+          </div>
+          <p className="text-[10px] text-slate-400 mt-1">
+            Sample cases are shown to students as examples. Hidden cases are used only for grading.
+          </p>
+        </div>
+        <Button
+          onClick={() => { setAdding(true); setEditingId(null); }}
+          size="sm"
+          className="h-9 bg-[#194BFB] text-white rounded-sm font-bold text-xs uppercase tracking-wider"
+        >
+          <Plus className="h-3.5 w-3.5 mr-2" /> Add Test Case
+        </Button>
+      </div>
+
+      {loading ? (
+        <div className="py-8 text-center text-slate-400 text-sm animate-pulse">Loading test cases...</div>
+      ) : testCases.length === 0 && !adding ? (
+        <div className="py-10 text-center border-2 border-dashed border-slate-200 rounded-sm">
+          <Terminal className="h-8 w-8 text-slate-300 mx-auto mb-3" />
+          <p className="text-slate-500 text-sm font-bold">No test cases yet</p>
+          <p className="text-[10px] text-slate-400 mt-1">Add at least one test case for auto-grading to work.</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {testCases.map((tc, i) =>
+            editingId === tc.id ? (
+              <TestCaseEditRow
+                key={tc.id}
+                tc={tc}
+                index={i}
+                onSave={updateCase}
+                onCancel={() => setEditingId(null)}
+              />
+            ) : (
+              <div key={tc.id} className="border border-slate-200 rounded-sm bg-white overflow-hidden">
+                <div className="flex items-center justify-between px-4 py-2.5 bg-slate-50 border-b border-slate-100">
+                  <div className="flex items-center gap-3">
+                    <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-widest">#{i + 1}</span>
+                    <button
+                      onClick={() => toggleSample(tc)}
+                      className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border transition-colors ${
+                        tc.is_sample
+                          ? "bg-green-50 text-green-700 border-green-200 hover:bg-green-100"
+                          : "bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200"
+                      }`}
+                    >
+                      {tc.is_sample ? "Sample · visible to student" : "Hidden · grading only"}
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="ghost" size="sm"
+                      onClick={() => { setEditingId(tc.id); setAdding(false); }}
+                      className="h-7 px-2 text-slate-500 hover:text-[#194BFB] text-xs"
+                    >
+                      <Pencil className="h-3 w-3 mr-1" /> Edit
+                    </Button>
+                    <Button
+                      variant="ghost" size="sm"
+                      onClick={() => deleteCase(tc.id)}
+                      className="h-7 px-2 text-red-400 hover:text-red-600 hover:bg-red-50 text-xs"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </Button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 divide-x divide-slate-100">
+                  <div className="p-4">
+                    <div className="text-[9px] uppercase font-extrabold text-slate-400 mb-2 tracking-widest">Input</div>
+                    <pre className="text-xs font-mono text-slate-700 whitespace-pre-wrap break-all min-h-[20px]">
+                      {tc.input || <span className="text-slate-300 italic not-italic font-sans">No input</span>}
+                    </pre>
+                  </div>
+                  <div className="p-4">
+                    <div className="text-[9px] uppercase font-extrabold text-slate-400 mb-2 tracking-widest">Expected Output</div>
+                    <pre className="text-xs font-mono text-slate-700 whitespace-pre-wrap break-all">{tc.expected_output}</pre>
+                  </div>
+                </div>
+              </div>
+            )
+          )}
+        </div>
+      )}
+
+      {/* Inline add form */}
+      {adding && (
+        <div className="border-2 border-dashed border-[#194BFB]/40 rounded-sm bg-blue-50/30 p-5 space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-200">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#194BFB]">New Test Case</span>
+            <button
+              onClick={() => setNewCase(prev => ({ ...prev, is_sample: !prev.is_sample }))}
+              className={`text-[10px] font-bold px-3 py-1 rounded-full border transition-colors ${
+                newCase.is_sample
+                  ? "bg-green-50 text-green-700 border-green-200"
+                  : "bg-slate-100 text-slate-500 border-slate-200"
+              }`}
+            >
+              {newCase.is_sample ? "Sample (visible to student)" : "Hidden (grading only)"}
+            </button>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label className="text-[9px] uppercase font-extrabold text-slate-400 tracking-widest">Input</Label>
+              <Textarea
+                value={newCase.input}
+                onChange={(e) => setNewCase(prev => ({ ...prev, input: e.target.value }))}
+                placeholder="stdin input (leave empty if none)"
+                className="min-h-[80px] font-mono text-xs rounded-sm"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-[9px] uppercase font-extrabold text-slate-400 tracking-widest">Expected Output *</Label>
+              <Textarea
+                value={newCase.expected_output}
+                onChange={(e) => setNewCase(prev => ({ ...prev, expected_output: e.target.value }))}
+                placeholder="Expected stdout"
+                className="min-h-[80px] font-mono text-xs rounded-sm"
+              />
+            </div>
+          </div>
+          <div className="flex gap-2 justify-end">
+            <Button
+              variant="ghost" size="sm"
+              onClick={() => { setAdding(false); setNewCase({ input: "", expected_output: "", is_sample: true }); }}
+              className="rounded-sm font-bold"
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={addCase}
+              disabled={savingNew || !newCase.expected_output.trim()}
+              className="bg-[#194BFB] text-white rounded-sm font-bold px-6"
+            >
+              {savingNew ? "Adding..." : "Add Test Case"}
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TestCaseEditRow({ tc, index, onSave, onCancel }) {
+  const [edited, setEdited] = useState({ ...tc });
+
+  return (
+    <div className="border-2 border-[#194BFB]/30 rounded-sm bg-blue-50/20 p-5 space-y-4 animate-in fade-in duration-150">
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#194BFB]">Editing #{index + 1}</span>
+        <button
+          onClick={() => setEdited(prev => ({ ...prev, is_sample: !prev.is_sample }))}
+          className={`text-[10px] font-bold px-3 py-1 rounded-full border transition-colors ${
+            edited.is_sample
+              ? "bg-green-50 text-green-700 border-green-200"
+              : "bg-slate-100 text-slate-500 border-slate-200"
+          }`}
+        >
+          {edited.is_sample ? "Sample (visible to student)" : "Hidden (grading only)"}
+        </button>
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label className="text-[9px] uppercase font-extrabold text-slate-400 tracking-widest">Input</Label>
+          <Textarea
+            value={edited.input}
+            onChange={(e) => setEdited(prev => ({ ...prev, input: e.target.value }))}
+            className="min-h-[80px] font-mono text-xs rounded-sm"
+          />
+        </div>
+        <div className="space-y-2">
+          <Label className="text-[9px] uppercase font-extrabold text-slate-400 tracking-widest">Expected Output *</Label>
+          <Textarea
+            value={edited.expected_output}
+            onChange={(e) => setEdited(prev => ({ ...prev, expected_output: e.target.value }))}
+            className="min-h-[80px] font-mono text-xs rounded-sm"
+          />
+        </div>
+      </div>
+      <div className="flex gap-2 justify-end">
+        <Button variant="ghost" size="sm" onClick={onCancel} className="rounded-sm font-bold">Cancel</Button>
+        <Button
+          size="sm"
+          onClick={() => onSave(edited)}
+          disabled={!edited.expected_output.trim()}
+          className="bg-[#194BFB] text-white rounded-sm font-bold px-6"
+        >
+          Save Changes
+        </Button>
       </div>
     </div>
   );
