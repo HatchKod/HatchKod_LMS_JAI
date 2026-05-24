@@ -5,6 +5,7 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
 import os
+import io
 import re
 import logging
 import time
@@ -122,6 +123,9 @@ import traceback
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3000",
         "https://hatchkod.in",
         "https://www.hatchkod.in",
         "https://app.hatchkod.in",
@@ -816,6 +820,7 @@ async def update_password(payload: UpdatePasswordIn, user: dict = Depends(get_cu
 AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
 AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
 AWS_S3_BUCKET = "hatchkod-course-images"
+AWS_S3_SUBMISSIONS_BUCKET = "hatchkod-student-submissions"
 AWS_S3_REGION = "ap-south-1"
 
 def get_s3_client():
@@ -1671,10 +1676,10 @@ async def is_topic_unlocked(student_id: str, topic_id: str) -> bool:
 @api.post("/submissions/upload")
 async def upload_submission_file(file: UploadFile = File(...), user: dict = Depends(require_roles("student"))):
     # Validation: File type
-    allowed_extensions = {".pdf", ".zip"}
+    allowed_extensions = {".pdf", ".zip", ".docx", ".png", ".jpg", ".jpeg", ".webp"}
     ext = Path(file.filename).suffix.lower()
     if ext not in allowed_extensions:
-        raise HTTPException(status_code=400, detail="File type not supported. Only PDF and ZIP are allowed.")
+        raise HTTPException(status_code=400, detail="File type not supported. Allowed: PDF, ZIP, DOCX, PNG, JPG, WEBP.")
     
     # Validation: File size (10MB)
     MAX_SIZE = 10 * 1024 * 1024
@@ -1682,16 +1687,20 @@ async def upload_submission_file(file: UploadFile = File(...), user: dict = Depe
     if len(content) > MAX_SIZE:
         raise HTTPException(status_code=400, detail="File size exceeds limit (10MB).")
     
-    # Upload to Supabase Storage
-    file_path = f"{user['id']}/{uuid.uuid4()}{ext}"
+    s3_key = f"{user['id']}/{uuid.uuid4()}{ext}"
     try:
-        supabase.storage.from_('submissions').upload(file_path, content, file_options={"content-type": file.content_type})
-        # Generate public URL
-        public_url = f"{SUPABASE_URL}/storage/v1/object/public/submissions/{file_path}"
+        s3 = get_s3_client()
+        s3.upload_fileobj(
+            io.BytesIO(content),
+            AWS_S3_SUBMISSIONS_BUCKET,
+            s3_key,
+            ExtraArgs={"ContentType": file.content_type}
+        )
+        public_url = f"https://{AWS_S3_SUBMISSIONS_BUCKET}.s3.{AWS_S3_REGION}.amazonaws.com/{s3_key}"
         return {"url": public_url}
     except Exception as e:
         logger.error(f"File upload failed: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to upload file to storage: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to upload file to S3: {str(e)}")
 
 
 @api.post("/subtopics/{subtopic_id}/submit")
@@ -1722,8 +1731,8 @@ async def submit_task(subtopic_id: str, payload: SubmissionIn, user: dict = Depe
     if payload.submission_url:
         github_regex = r"^https?://(www\.)?github\.com/[\w.-]+/[\w.-]+/?.*$"
         is_github = re.match(github_regex, payload.submission_url)
-        is_storage = "/storage/v1/object/public/submissions/" in payload.submission_url
-        
+        is_storage = "hatchkod-student-submissions.s3.ap-south-1.amazonaws.com" in payload.submission_url
+
         if not (is_github or is_storage):
             raise HTTPException(400, "Invalid submission format. Provide a GitHub URL or upload a file.")
 

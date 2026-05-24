@@ -66,7 +66,7 @@ export default function SubtopicView() {
         const sUrl = res.data.submission.submission_url || "";
         setUrl(sUrl);
         setText(res.data.submission.submission_text || "");
-        if (sUrl.includes("/storage/v1/object/public/submissions/")) {
+        if (sUrl.includes("hatchkod-student-submissions.s3.ap-south-1.amazonaws.com")) {
           setSubmissionType("file");
         } else {
           setSubmissionType("link");
@@ -160,10 +160,10 @@ export default function SubtopicView() {
   const handleFileChange = (e) => {
     const selected = e.target.files[0];
     if (!selected) return;
-    const allowed = [".pdf", ".zip"];
+    const allowed = [".pdf", ".zip", ".docx", ".png", ".jpg", ".jpeg", ".webp"];
     const ext = selected.name.slice(selected.name.lastIndexOf(".")).toLowerCase();
     if (!allowed.includes(ext)) {
-      setSubmissionError("File type not supported. Only PDF and ZIP are allowed.");
+      setSubmissionError("File type not supported. Allowed: PDF, ZIP, DOCX, PNG, JPG, WEBP.");
       e.target.value = "";
       return;
     }
@@ -945,7 +945,7 @@ export default function SubtopicView() {
                                   <FileUp className="h-4 w-4" />
                                 </div>
                                 <div className="font-bold text-sm">Upload File</div>
-                                <div className="text-[10px] text-slate-500 uppercase tracking-wider mt-1">ZIP or PDF</div>
+                                <div className="text-[10px] text-slate-500 uppercase tracking-wider mt-1">PDF, ZIP, DOCX, PNG, JPG</div>
                               </button>
                             </div>
                             {submissionType === "link" ? (
@@ -956,7 +956,7 @@ export default function SubtopicView() {
                             ) : (
                               <div className="space-y-2">
                                 <Label className="text-[10px] uppercase font-bold text-slate-400 tracking-widest">Choose File</Label>
-                                <Input type="file" onChange={handleFileChange} className="rounded-sm border-slate-200 h-11 py-2 cursor-pointer" />
+                                <Input type="file" accept=".pdf,.zip,.docx,.png,.jpg,.jpeg,.webp" onChange={handleFileChange} className="rounded-sm border-slate-200 h-11 py-2 cursor-pointer" />
                               </div>
                             )}
                             <div className="space-y-2">
