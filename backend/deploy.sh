@@ -4,27 +4,55 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-echo "==> Pulling latest code from git..."
+echo ""
+echo "========================================"
+echo "  HatchKod Backend — Deploy"
+echo "========================================"
+
+echo ""
+echo "[1/5] Pulling latest code..."
 git -C "$SCRIPT_DIR/.." pull
 
-echo "==> Setting up Python virtual environment..."
+echo ""
+echo "[2/5] Setting up Python virtual environment..."
 python3 -m venv venv
 source venv/bin/activate
 
-echo "==> Installing dependencies..."
-pip install -r requirements.txt
+echo ""
+echo "[3/5] Installing dependencies..."
+pip install -r requirements.txt --quiet
 
-echo "==> Creating logs directory..."
+echo ""
+echo "[4/5] Creating logs directory..."
 mkdir -p logs
 
-echo "==> Starting/reloading app with PM2..."
+echo ""
+echo "[5/5] Restarting backend process..."
 pm2 describe hatchkod-backend > /dev/null 2>&1 \
-  && pm2 reload ecosystem.config.js --update-env \
+  && pm2 reload hatchkod-backend --update-env \
   || pm2 start ecosystem.config.js --update-env
 pm2 save
 
-echo "==> Copying nginx config..."
-sudo cp nginx.conf /etc/nginx/conf.d/hatchkod.conf
-sudo nginx -t && sudo systemctl reload nginx
+echo ""
+echo "========================================"
+echo "  Service Status"
+echo "========================================"
 
-echo "==> Done. Backend is live."
+pm2 list
+
+echo ""
+if sudo systemctl is-active --quiet nginx; then
+  echo "nginx:    running"
+else
+  echo "nginx:    STOPPED — run: sudo systemctl start nginx"
+fi
+
+if sudo systemctl is-active --quiet certbot-renew.timer; then
+  echo "certbot:  auto-renew active"
+else
+  echo "certbot:  auto-renew INACTIVE — run: sudo systemctl enable --now certbot-renew.timer"
+fi
+
+echo ""
+echo "Deploy complete. Live at https://api.hatchkod.in"
+echo ""
