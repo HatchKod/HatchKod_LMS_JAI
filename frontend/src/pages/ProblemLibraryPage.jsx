@@ -8,8 +8,11 @@ import { toast } from "sonner";
 import { Search, Filter, CheckCircle2, AlertCircle, ChevronLeft, ChevronRight } from "lucide-react";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
+import { useAuth } from "../lib/auth";
 
 export default function ProblemLibraryPage() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
   const [problems, setProblems] = useState([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
@@ -57,7 +60,7 @@ export default function ProblemLibraryPage() {
           <div className="relative w-full md:w-80">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
             <Input 
-              placeholder="Search problems or tags..." 
+              placeholder="Search problems"
               className="pl-10 h-10 rounded-md border-slate-200 bg-white shadow-sm"
               value={search}
               onChange={(e) => { setSearch(e.target.value); setCurrentPage(1); }}
@@ -81,7 +84,7 @@ export default function ProblemLibraryPage() {
                       <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500">#</th>
                       <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500">Title</th>
                       <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500 text-center">Difficulty</th>
-                      <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500">Tags</th>
+                      {isAdmin && <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500">Tags</th>}
                       <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500 text-right">Status</th>
                     </tr>
                   </thead>
@@ -104,15 +107,17 @@ export default function ProblemLibraryPage() {
                             {p.difficulty}
                           </Badge>
                         </td>
-                        <td className="px-6 py-4">
-                          <div className="flex flex-wrap gap-1.5">
-                            {p.tags.map(t => (
-                              <span key={t} className="text-[10px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
-                                {t}
-                              </span>
-                            ))}
-                          </div>
-                        </td>
+                        {isAdmin && (
+                          <td className="px-6 py-4">
+                            <div className="flex flex-wrap gap-1.5">
+                              {p.tags.map(t => (
+                                <span key={t} className="text-[10px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
+                                  {t}
+                                </span>
+                              ))}
+                            </div>
+                          </td>
+                        )}
                         <td className="px-6 py-4 text-right">
                           {p.solved ? (
                             <div className="inline-flex items-center gap-1.5 text-emerald-500 font-bold text-xs uppercase tracking-wider">
@@ -132,7 +137,7 @@ export default function ProblemLibraryPage() {
                     ))}
                     {filtered.length === 0 && (
                       <tr>
-                        <td colSpan="5" className="px-6 py-12 text-center text-slate-500 italic">
+                        <td colSpan={isAdmin ? 5 : 4} className="px-6 py-12 text-center text-slate-500 italic">
                           No problems found matching your search.
                         </td>
                       </tr>
