@@ -10,7 +10,7 @@ import { Button } from "../components/ui/button";
 import TodaysClasses from "../components/student/TodaysClasses";
 import { Avatar, AvatarFallback } from "../components/ui/avatar";
 import StatusPill from "../components/StatusPill";
-import { Users, Award, Target, Flame, Trophy, Video, BookOpen, ListChecks, Clock, ArrowRight, TrendingUp } from "lucide-react";
+import { Users, Award, Target, Flame, Trophy, Video, BookOpen, ListChecks, Clock, ArrowRight, TrendingUp, Mail, Phone, CheckCircle2, Lock, MessageCircle } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -141,6 +141,164 @@ export default function StudentDashboard() {
   }
 
   if (!data) return null;
+
+  if (!user?.batch_id) {
+    return (
+      <div className="min-h-screen bg-[#F8FAFC]" data-testid="student-dashboard">
+        <Navbar />
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 py-8 fade-in">
+
+          {/* ── Hero Banner ─────────────────────────────────────────── */}
+          <div className="relative bg-[#0A0A0A] rounded-sm overflow-hidden mb-8 shadow-sm">
+            {/* dot-grid texture */}
+            <div className="absolute inset-0 opacity-[0.04]"
+              style={{ backgroundImage: 'radial-gradient(circle, white 1px, transparent 1px)', backgroundSize: '28px 28px' }} />
+            {/* blue ambient glow */}
+            <div className="absolute -top-20 -right-20 w-96 h-96 bg-[#194BFB]/20 rounded-full blur-3xl pointer-events-none" />
+
+            <div className="relative p-8 md:p-12">
+              {/* Status badge */}
+              <div className="inline-flex items-center gap-2 bg-amber-500/10 border border-amber-500/25 rounded-full px-4 py-1.5 mb-6">
+                <div className="h-2 w-2 rounded-full bg-amber-400 animate-pulse" />
+                <span className="text-xs font-semibold text-amber-400 tracking-wide">Awaiting Batch Assignment</span>
+              </div>
+
+              <h1 className="text-3xl md:text-4xl font-bold text-white mb-3 font-['Outfit']" data-testid="dashboard-heading">
+                Welcome to HatchKod, {user?.name?.split(" ")[0] || "there"}! 👋
+              </h1>
+              <p className="text-slate-400 text-sm leading-relaxed max-w-xl mb-10">
+                Your account is active and you're all set. An admin will assign you to a batch shortly —
+                once that happens, you'll have full access to your courses, Codepad, and Challenges.
+              </p>
+
+              {/* Inline stepper */}
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-0">
+                {/* Step 1 */}
+                <div className="flex sm:flex-col items-center sm:items-center gap-3 sm:gap-2 flex-1">
+                  <div className="h-10 w-10 rounded-full bg-emerald-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-emerald-500/30">
+                    <CheckCircle2 className="h-5 w-5 text-white" />
+                  </div>
+                  <div className="sm:text-center">
+                    <div className="text-xs font-bold text-emerald-400">Account Created</div>
+                    <div className="text-[11px] text-slate-500">You're registered</div>
+                  </div>
+                </div>
+                {/* Connector */}
+                <div className="hidden sm:block flex-1 h-px bg-gradient-to-r from-emerald-500/50 to-amber-400/50 mx-3" />
+                {/* Step 2 */}
+                <div className="flex sm:flex-col items-center sm:items-center gap-3 sm:gap-2 flex-1">
+                  <div className="h-10 w-10 rounded-full border-2 border-amber-400 bg-amber-400/10 flex items-center justify-center flex-shrink-0">
+                    <div className="h-3 w-3 rounded-full bg-amber-400 animate-pulse" />
+                  </div>
+                  <div className="sm:text-center">
+                    <div className="text-xs font-bold text-amber-400">Batch Assignment</div>
+                    <div className="text-[11px] text-slate-500">Admin is setting this up</div>
+                  </div>
+                </div>
+                {/* Connector */}
+                <div className="hidden sm:block flex-1 h-px bg-slate-700 mx-3" />
+                {/* Step 3 */}
+                <div className="flex sm:flex-col items-center sm:items-center gap-3 sm:gap-2 flex-1">
+                  <div className="h-10 w-10 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center flex-shrink-0">
+                    <Lock className="h-4 w-4 text-slate-600" />
+                  </div>
+                  <div className="sm:text-center">
+                    <div className="text-xs font-bold text-slate-500">Start Learning</div>
+                    <div className="text-[11px] text-slate-600">Full access unlocks here</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* ── Stats Row ────────────────────────────────────────────── */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
+            <Stat label="Total XP" value={`${data.gamification?.total_xp || 0} XP`} Icon={Award} />
+            <Stat label="Current Level" value={`Lvl ${data.gamification?.level || 1}`} Icon={Target} subtitle={`Next: ${100 - ((data.gamification?.total_xp || 0) % 100)} XP`} />
+            <Stat label="Daily Streak" value={`${data.gamification?.streak || 0} ${data.gamification?.streak === 1 ? 'Day' : 'Days'}`} Icon={Flame} />
+            <Stat
+              label="Weekly Rank"
+              value={data.gamification?.weekly_rank === "N/A" ? "N/A" : `#${data.gamification?.weekly_rank}`}
+              Icon={Trophy}
+              link="/leaderboard"
+              linkText="View Board"
+            />
+            <Stat label="My Progress" value="View →" Icon={TrendingUp} link="/student/progress" linkText="Open Progress" />
+          </div>
+
+          {/* ── Support Card (full-width, centered) ─────────────────── */}
+          <div className="bg-[#0A0A0A] rounded-sm shadow-sm overflow-hidden">
+
+            {/* Header */}
+            <div className="px-8 pt-8 pb-6 border-b border-white/5 text-center">
+              <div className="text-[10px] uppercase tracking-[0.22em] text-slate-500 font-bold mb-2">Support &amp; Help</div>
+              <h3 className="text-lg font-bold text-white mb-1">Need assistance? We're here for you</h3>
+              <p className="text-sm text-slate-400 max-w-md mx-auto">Our team typically assigns batches within 1–2 working days. Reach out any time if you need help.</p>
+            </div>
+
+            {/* Help topics */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 px-8 py-6 border-b border-white/5">
+              <div className="bg-white/[0.04] border border-white/8 rounded-sm p-4 flex items-start gap-3">
+                <div className="h-9 w-9 rounded-sm bg-amber-500/10 border border-amber-500/20 flex items-center justify-center flex-shrink-0">
+                  <Users className="h-4 w-4 text-amber-400" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-white mb-1">Batch not assigned yet?</p>
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    If it's been more than 2 working days, message us and we'll check your status immediately.
+                  </p>
+                </div>
+              </div>
+              <div className="bg-white/[0.04] border border-white/8 rounded-sm p-4 flex items-start gap-3">
+                <div className="h-9 w-9 rounded-sm bg-[#194BFB]/15 border border-[#194BFB]/25 flex items-center justify-center flex-shrink-0">
+                  <MessageCircle className="h-4 w-4 text-[#194BFB]" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-white mb-1">Need Payment Support?</p>
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    Made a manual bank transfer or ran into a payment issue? We'll manually activate your access.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Contact details — big & centered */}
+            <div className="px-8 py-8">
+              <div className="text-[10px] uppercase tracking-widest text-slate-600 font-bold text-center mb-6">Contact Information</div>
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-4 max-w-2xl mx-auto">
+                <a
+                  href="mailto:support@hatchkod.in"
+                  className="flex items-center gap-4 px-8 py-5 rounded-sm bg-white/[0.04] border border-white/8 hover:bg-[#194BFB]/10 hover:border-[#194BFB]/30 transition-all group w-full sm:w-auto"
+                >
+                  <div className="h-12 w-12 rounded-sm bg-[#194BFB]/20 border border-[#194BFB]/30 flex items-center justify-center flex-shrink-0">
+                    <Mail className="h-5 w-5 text-[#194BFB]" />
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-slate-500 uppercase tracking-wider font-bold mb-0.5">Email Us</div>
+                    <div className="text-base font-semibold text-slate-200 group-hover:text-white transition-colors">support@hatchkod.in</div>
+                  </div>
+                </a>
+                <div className="hidden sm:flex items-center justify-center h-10 w-8 text-slate-700 text-sm font-medium">or</div>
+                <a
+                  href="tel:+919704897596"
+                  className="flex items-center gap-4 px-8 py-5 rounded-sm bg-white/[0.04] border border-white/8 hover:bg-[#194BFB]/10 hover:border-[#194BFB]/30 transition-all group w-full sm:w-auto"
+                >
+                  <div className="h-12 w-12 rounded-sm bg-[#194BFB]/20 border border-[#194BFB]/30 flex items-center justify-center flex-shrink-0">
+                    <Phone className="h-5 w-5 text-[#194BFB]" />
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-slate-500 uppercase tracking-wider font-bold mb-0.5">Call / WhatsApp</div>
+                    <div className="text-base font-semibold text-slate-200 group-hover:text-white transition-colors">+91 97048 97596</div>
+                  </div>
+                </a>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const inprogressCourses = data.courses.filter(c => c.progress < 100);
   const completedCourses = data.courses.filter(c => c.progress === 100);

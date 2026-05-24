@@ -1,7 +1,7 @@
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 
-export function ProtectedRoute({ children, roles }) {
+export function ProtectedRoute({ children, roles, requiresBatch }) {
   const { user, loading } = useAuth();
   const location = useLocation();
 
@@ -23,6 +23,10 @@ export function ProtectedRoute({ children, roles }) {
     if (!allowedPaths.includes(location.pathname)) {
       return <Navigate to="/billing" replace />;
     }
+  }
+
+  if (requiresBatch && user.role === "student" && !user.batch_id) {
+    return <Navigate to="/dashboard" replace />;
   }
 
   return children;
