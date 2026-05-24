@@ -1795,6 +1795,12 @@ async def complete_subtopic(subtopic_id: str, payload: TopicCompleteIn, user: di
         else:
             raise HTTPException(400, "Subtopics with tasks must be approved by a mentor.")
 
+    # Check if already completed before awarding XP
+    already_done = get_single_or_none(
+        supabase.table("student_progress").select("is_completed")
+        .eq("student_id", user["id"]).eq("subtopic_id", subtopic_id).eq("is_completed", True)
+    )
+
     # Record completion
     supabase.table("student_progress").upsert({
         "student_id": user["id"],
@@ -1813,8 +1819,10 @@ async def complete_subtopic(subtopic_id: str, payload: TopicCompleteIn, user: di
         }).execute()
     except Exception as e:
         logger.error(f"Error recording time spent in subtopic_completions: {e}")
-    
-    # Award XP
+
+    # Award XP only on first completion
+    if already_done:
+        return {"ok": True, "gamification": None}
     try:
         xp_data = award_xp(user["id"], "lesson_completed")
         return {"ok": True, "gamification": xp_data}
