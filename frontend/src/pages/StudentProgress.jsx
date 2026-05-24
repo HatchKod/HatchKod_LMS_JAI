@@ -1,11 +1,11 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useNavigate, Link, useSearchParams } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { toast } from "sonner";
+import { useQuery } from "@tanstack/react-query";
 import {
-  BookOpen, Clock, Layers, Calendar, Trophy,
+  BookOpen, Layers, Calendar, Trophy,
   ArrowRight, Lock
 } from "lucide-react";
 
@@ -44,72 +44,65 @@ export default function StudentProgress() {
   const [searchParams] = useSearchParams();
   const batchId = searchParams.get("batchId");
   const navigate = useNavigate();
-  const [progressData, setProgressData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [paymentStatus, setPaymentStatus] = useState(null);
-  // null = not yet fetched, [] = no batches / mentor view, [...] = loaded
-  const [enrolledBatches, setEnrolledBatches] = useState(null);
   const [activeBatchId, setActiveBatchId] = useState(batchId || null);
-  // true once enrolled-batches is resolved (or not needed); gates fetchProgress
-  const [batchesLoaded, setBatchesLoaded] = useState(!!paramStudentId || !!batchId);
 
-  useEffect(() => {
-    if (user?.role !== "student" || paramStudentId) return;
-    (async () => {
+  // Payment gate (student own view only)
+  const { data: paymentStatus } = useQuery({
+    queryKey: ["payment-status", user?.id],
+    queryFn: async () => {
       try {
         const { data } = await api.get("/payment/status");
-        setPaymentStatus(data);
+        return data;
       } catch (err) {
         if (err.response?.status === 403 && err.response?.data?.detail?.code === "ACCESS_EXPIRED") {
-          setPaymentStatus({ effective_tier: "expired" });
+          return { effective_tier: "expired" };
         }
+        return null;
       }
-    })();
-  }, [user?.access_tier, user?.role, paramStudentId]);
+    },
+    enabled: !!user?.id && user?.role === "student" && !paramStudentId,
+    staleTime: 1000 * 60 * 5,
+  });
 
-  // Fetch all courses the student is enrolled in (student's own progress page only)
+  // Enrolled batches — shared query key so dashboard prefetch populates this cache
+  const { data: enrolledBatches } = useQuery({
+    queryKey: ["enrolled-batches", user?.id],
+    queryFn: async () => {
+      const { data } = await api.get("/students/me/enrolled-batches");
+      return data;
+    },
+    enabled: !!user?.id && user?.role === "student" && !paramStudentId,
+    staleTime: 1000 * 60 * 5,
+  });
+
+  // Set active batch to first batch once loaded (if not already set from URL)
   useEffect(() => {
-    if (!user?.id) return;
-    if (user?.role !== "student" || paramStudentId) {
-      setEnrolledBatches([]);
-      return;
+    if (!activeBatchId && enrolledBatches?.length > 0) {
+      setActiveBatchId(enrolledBatches[0].batch_id);
     }
-    api.get("/students/me/enrolled-batches")
-      .then(({ data }) => {
-        setEnrolledBatches(data);
-        if (!activeBatchId && data.length > 0) {
-          setActiveBatchId(data[0].batch_id);
-        }
-        setBatchesLoaded(true);
-      })
-      .catch(() => {
-        setEnrolledBatches([]);
-        setBatchesLoaded(true);
-      });
-  }, [user?.id, user?.role, paramStudentId]);
+  }, [enrolledBatches, activeBatchId]);
 
-  const fetchProgress = useCallback(async () => {
-    const targetId = paramStudentId || user?.id;
-    if (!targetId) return;
-    // For student's own view: wait until enrolled batches are resolved
-    if (user?.role === "student" && !paramStudentId && !batchesLoaded) return;
+  const targetId = paramStudentId || user?.id;
+  const effectiveBatchId = paramStudentId ? batchId : activeBatchId;
+  const progressEnabled = !!targetId && (
+    !!paramStudentId ||
+    user?.role !== "student" ||
+    !!effectiveBatchId
+  );
 
-    const effectiveBatchId = paramStudentId ? batchId : activeBatchId;
-    setLoading(true);
-    try {
+  // Progress data — cached per (user, batch); tab switching is instant on revisit
+  const { data: progressData, isLoading: loading } = useQuery({
+    queryKey: ["student-progress", targetId, effectiveBatchId ?? "default"],
+    queryFn: async () => {
       const url = effectiveBatchId
         ? `/students/${targetId}/progress?batchId=${effectiveBatchId}`
         : `/students/${targetId}/progress`;
       const { data } = await api.get(url);
-      setProgressData(data);
-    } catch {
-      toast.error("Failed to load progress data");
-    } finally {
-      setLoading(false);
-    }
-  }, [user?.id, user?.role, paramStudentId, batchId, activeBatchId, batchesLoaded]);
-
-  useEffect(() => { fetchProgress(); }, [fetchProgress]);
+      return data;
+    },
+    enabled: progressEnabled,
+    staleTime: 1000 * 60 * 3,
+  });
 
   if (user?.role === "student" && (paymentStatus?.effective_tier === "expired" || user?.access_tier === "expired")) {
     navigate("/billing", { replace: true });
@@ -154,8 +147,6 @@ export default function StudentProgress() {
     module_title: current_subtopic.module_title
   } : null);
 
-  const totalHours = Math.floor(total_time_spent_minutes / 60);
-  const totalMins = total_time_spent_minutes % 60;
   const daysSince = first_completed_at
     ? Math.max(1, Math.round((Date.now() - new Date(first_completed_at)) / 86400000))
     : 0;
@@ -171,12 +162,7 @@ export default function StudentProgress() {
             {enrolledBatches.map((b) => (
               <button
                 key={b.batch_id}
-                onClick={() => {
-                  if (b.batch_id !== activeBatchId) {
-                    setActiveBatchId(b.batch_id);
-                    setProgressData(null);
-                  }
-                }}
+                onClick={() => setActiveBatchId(b.batch_id)}
                 className={`shrink-0 px-5 py-3 text-xs font-bold border-b-2 transition-colors whitespace-nowrap ${
                   b.batch_id === activeBatchId
                     ? "border-[#194BFB] text-[#194BFB]"
@@ -290,14 +276,6 @@ export default function StudentProgress() {
             <div className="flex items-center gap-2 text-sm text-slate-600">
               <BookOpen className="w-4 h-4 text-slate-400" />
               <span><strong className="text-slate-800">{displayCompleted}/{displayTotal}</strong> Subtopics Done</span>
-            </div>
-            <div className="flex items-center gap-2 text-sm text-slate-600">
-              <Clock className="w-4 h-4 text-slate-400" />
-              <span>
-                <strong className="text-slate-800">
-                  {total_time_spent_minutes < 60 ? `${total_time_spent_minutes} min` : `${totalHours}h ${totalMins}m`}
-                </strong> Spent
-              </span>
             </div>
             <div className="flex items-center gap-2 text-sm text-slate-600">
               <Layers className="w-4 h-4 text-slate-400" />

@@ -86,6 +86,8 @@ def user_key_builder(
 # -------------------- Config --------------------
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+# Service-role key bypasses RLS — required for backend writes (XP, progress, etc.)
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", SUPABASE_KEY)
 JWT_SECRET = os.getenv("JWT_SECRET")
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM")
 ACCESS_TOKEN_MIN = int(os.getenv("ACCESS_TOKEN_MIN", 60))
@@ -99,7 +101,7 @@ JUDGE0_AUTH_TOKEN = os.getenv("JUDGE0_AUTH_TOKEN", "")
 
 supabase = create_client(
     SUPABASE_URL,
-    SUPABASE_KEY,
+    SUPABASE_SERVICE_KEY,
     options=ClientOptions(
         postgrest_client_timeout=30.0,
         storage_client_timeout=30.0,
@@ -241,6 +243,17 @@ def create_token(user_id: str, email: str, role: str) -> str:
 
 
 # -------------------- Gamification Logic --------------------
+_LEVEL_THRESHOLDS = [0, 100, 300, 600, 1000, 1500, 2100, 2800, 3600, 4500]
+
+def xp_to_level(total_xp: int) -> int:
+    level = 1
+    for i, threshold in enumerate(_LEVEL_THRESHOLDS):
+        if total_xp >= threshold:
+            level = i + 1
+        else:
+            break
+    return level
+
 def award_xp(user_id: str, action_type: str):
     try:
         xp_map = {
@@ -281,16 +294,17 @@ def award_xp(user_id: str, action_type: str):
         
         # Calculate new total XP and Level
         new_total_xp = (user.get("total_xp") or 0) + xp_to_award
-        new_level = (new_total_xp // 100) + 1
+        new_level = xp_to_level(new_total_xp)
 
         # Update user
-        supabase.table("users").update({
+        update_res = supabase.table("users").update({
             "total_xp": new_total_xp,
             "level": new_level,
             "current_streak": current_streak,
             "last_active_date": today.isoformat(),
-            "updated_at": iso(now)
         }).eq("id", user_id).execute()
+        if not update_res.data:
+            logger.error(f"award_xp: users update returned 0 rows for user {user_id} — check RLS / service key")
 
         # Log activity
         supabase.table("user_activity").insert({
@@ -4073,8 +4087,16 @@ async def get_my_enrolled_batches(user: dict = Depends(require_roles("student"))
     return result
 
 
+def student_progress_key_builder(func, namespace="", request=None, response=None, *args, **kwargs):
+    from fastapi_cache import FastAPICache
+    prefix = f"{FastAPICache.get_prefix()}:{namespace}:{func.__module__}:{func.__name__}"
+    user = kwargs.get("user")
+    uid = user["id"] if user and isinstance(user, dict) and "id" in user else "anon"
+    batch = kwargs.get("batchId") or (request.query_params.get("batchId") if request else "")
+    return f"{prefix}:user:{uid}:batch:{batch or 'default'}"
+
 @api.get("/students/{student_id}/progress")
-@cache(expire=180, key_builder=user_key_builder)
+@cache(expire=180, key_builder=student_progress_key_builder)
 async def get_specific_student_progress(student_id: str, batchId: str = None, user: dict = Depends(get_current_user)):
     # 1. Permission check: Admin, Mentor (if assigned), or the Student themselves
     if user["role"] == "student" and user["id"] != student_id:

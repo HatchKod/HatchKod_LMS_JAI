@@ -67,6 +67,34 @@ export default function StudentDashboard() {
     return () => timers.forEach(clearTimeout);
   }, [data, queryClient]);
 
+  // Silently prefetch progress page data so "View Progress" click is instant
+  useEffect(() => {
+    if (!user?.id || !data) return;
+    const timer = setTimeout(async () => {
+      try {
+        let batches = queryClient.getQueryData(["enrolled-batches", user.id]);
+        if (!batches) {
+          const { data: batchData } = await api.get("/students/me/enrolled-batches");
+          batches = batchData;
+          queryClient.setQueryData(["enrolled-batches", user.id], batchData);
+        }
+        batches?.forEach((b, i) => {
+          setTimeout(() => {
+            queryClient.prefetchQuery({
+              queryKey: ["student-progress", user.id, b.batch_id],
+              queryFn: async () => {
+                const { data: pd } = await api.get(`/students/${user.id}/progress?batchId=${b.batch_id}`);
+                return pd;
+              },
+              staleTime: 1000 * 60 * 3,
+            });
+          }, i * 800);
+        });
+      } catch { /* silent — prefetch failure is not user-facing */ }
+    }, 2000); // wait 2s after dashboard renders before background fetch
+    return () => clearTimeout(timer);
+  }, [data, user?.id, queryClient]);
+
   useEffect(() => {
     if (data && window.location.hash === "#courses-section") {
       const el = document.getElementById("courses-section");
