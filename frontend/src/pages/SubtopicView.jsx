@@ -653,7 +653,9 @@ export default function SubtopicView() {
                       <div className="h-1 w-8 bg-red-500" />
                       Assigned Homework
                     </div>
-                    <h3 className="font-['Outfit'] font-extrabold text-2xl tracking-tight leading-tight">{task.description}</h3>
+                    <div className="markdown-content-dark">
+                      <ReactMarkdown>{task.description}</ReactMarkdown>
+                    </div>
                   </div>
                   <div className="absolute top-0 right-0 p-8 opacity-10">
                     <ClipboardCheck className="h-24 w-24 -rotate-12" />
@@ -681,8 +683,8 @@ export default function SubtopicView() {
                 {/* Instructions */}
                 <div>
                   <h4 className="text-[10px] uppercase font-bold text-slate-400 tracking-widest mb-4">Instructions</h4>
-                  <div className="bg-slate-50/50 border border-slate-100 p-6 rounded-sm text-slate-600 leading-relaxed">
-                    {task.instructions || "No specific instructions provided."}
+                  <div className="bg-slate-50/50 border border-slate-100 p-6 rounded-sm markdown-content">
+                    <ReactMarkdown>{task.instructions || "No specific instructions provided."}</ReactMarkdown>
                   </div>
                 </div>
 
