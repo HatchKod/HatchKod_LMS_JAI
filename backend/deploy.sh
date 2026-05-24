@@ -24,8 +24,7 @@ pm2 describe hatchkod-backend > /dev/null 2>&1 \
 pm2 save
 
 echo "==> Copying nginx config..."
-sudo cp nginx.conf /etc/nginx/sites-available/hatchkod
-sudo ln -sf /etc/nginx/sites-available/hatchkod /etc/nginx/sites-enabled/hatchkod
+sudo cp nginx.conf /etc/nginx/conf.d/hatchkod.conf
 sudo nginx -t && sudo systemctl reload nginx
 
 echo "==> Done. Backend is live."
