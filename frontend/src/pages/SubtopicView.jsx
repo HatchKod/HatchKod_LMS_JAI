@@ -128,6 +128,8 @@ export default function SubtopicView() {
     setData(null);
     setCode("");
     setCodeResults(null);
+    setStdin("");
+    setRunOutput(null);
     setIsCompleted(false);
     setCompletedAt(null);
     load();
