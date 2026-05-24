@@ -11,7 +11,8 @@ echo "========================================"
 
 echo ""
 echo "[1/5] Pulling latest code..."
-git -C "$SCRIPT_DIR/.." pull
+git -C "$SCRIPT_DIR/.." fetch origin
+git -C "$SCRIPT_DIR/.." reset --hard origin/stage
 
 echo ""
 echo "[2/5] Setting up Python virtual environment..."
