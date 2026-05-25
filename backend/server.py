@@ -1694,13 +1694,15 @@ async def is_topic_unlocked(student_id: str, topic_id: str, batch_id: str = None
     if not seq_unlocked:
         return (False, "seq_locked")
 
-    # Check mentor gate: topic must be explicitly unlocked by mentor for this batch
-    if batch_id:
-        mentor_row = get_single_or_none(
-            supabase.table("batch_topic_access").select("id").eq("batch_id", batch_id).eq("topic_id", topic_id)
-        )
-        if not mentor_row:
-            return (False, "mentor_locked")
+    # Check mentor gate: topic must be explicitly unlocked by mentor for this batch.
+    # If the student has no batch assigned, deny by default (no mentor to grant access).
+    if not batch_id:
+        return (False, "mentor_locked")
+    mentor_row = get_single_or_none(
+        supabase.table("batch_topic_access").select("id").eq("batch_id", batch_id).eq("topic_id", topic_id)
+    )
+    if not mentor_row:
+        return (False, "mentor_locked")
 
     return (True, None)
 
@@ -2610,7 +2612,7 @@ async def get_batch_topic_access(batch_id: str, user: dict = Depends(require_rol
         batch = get_single_or_none(supabase.table("batches").select("mentor_id").eq("id", batch_id))
         if not batch or batch["mentor_id"] != user["id"]:
             raise HTTPException(403, "Not your batch")
-    rows = supabase.table("batch_topic_access").select("topic_id, unlocked_at").eq("batch_id", batch_id).execute().data or []
+    rows = supabase.table("batch_topic_access").select("topic_id").eq("batch_id", batch_id).execute().data or []
     return [r["topic_id"] for r in rows]
 
 

@@ -391,26 +391,6 @@ export default function SubtopicView() {
     ? allFlatSubtopics.findIndex(s => !s.completed)
     : -1;
 
-  // Compute set of topic IDs at and after the mentor-locked boundary
-  const mentorLockedTopicId = (next_topic_locked && next_subtopic)
-    ? (() => {
-        for (const m of (course?.modules || []))
-          for (const t of (m.topics || []))
-            if ((t.subtopics || []).some(s => s.id === next_subtopic.id)) return t.id;
-        return null;
-      })()
-    : null;
-  const topicsAfterMentorLock = (() => {
-    if (!mentorLockedTopicId) return new Set();
-    const result = new Set();
-    let found = false;
-    for (const m of (course?.modules || []))
-      for (const t of (m.topics || [])) {
-        if (t.id === mentorLockedTopicId) found = true;
-        if (found) result.add(t.id);
-      }
-    return result;
-  })();
 
   const getEmbedUrl = (url) => {
     if (!url) return "";

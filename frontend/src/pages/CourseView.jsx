@@ -65,6 +65,7 @@ export default function CourseView() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'modules', filter: `course_id=eq.${id}` }, invalidate)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'topics' }, invalidate)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'subtopics' }, invalidate)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'batch_topic_access' }, invalidate)
       .subscribe();
     return () => supabase.removeChannel(channel);
   }, [id, queryClient]);

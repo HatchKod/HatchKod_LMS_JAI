@@ -109,7 +109,7 @@ export default function BatchTopicAccess({ batches }) {
               Topics — {selectedBatch?.name}
             </div>
             <div className="text-[10px] text-slate-400">
-              {unlockedIds.size} / {topics.length} unlocked
+              {unlockedIds.size + (topics.length > 0 ? 1 : 0)} / {topics.length} unlocked
             </div>
           </div>
 
