@@ -97,7 +97,7 @@ export default function StudentBilling() {
       const order = await createRazorpayOrder(orderPayload);
       
       const options = {
-        key: "rzp_test_SrKC5KJ2yJhtWF",
+        key: "rzp_live_StJn7CoajOWQVf",
         amount: order.amount,
         currency: order.currency,
         name: "HatchKod LMS",
