@@ -66,6 +66,7 @@ export default function Login() {
           </form>
         </Card>
 
+        {/* Demo accounts panel hidden for production
         <div className="mt-6 border border-border rounded-sm p-4 bg-[#F4F5F7]">
           <div className="text-[10px] uppercase tracking-[0.22em] text-slate-500 mb-2">Demo accounts</div>
           <div className="flex flex-wrap gap-2">
@@ -74,6 +75,7 @@ export default function Login() {
             <Button size="sm" variant="outline" className="rounded-sm" onClick={() => fillDemo("student")} data-testid="demo-student-btn">Student</Button>
           </div>
         </div>
+        */}
       </div>
     </div>
   );
