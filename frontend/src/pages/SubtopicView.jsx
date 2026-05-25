@@ -245,9 +245,9 @@ export default function SubtopicView() {
       setIsCompleted(true);
       setCompletedAt(new Date().toISOString());
       if (course?.id) queryClient.invalidateQueries({ queryKey: ["course", course.id] });
-      if (data.next_subtopic) {
+      if (data.next_subtopic && !data.next_topic_locked) {
         navigate(`/subtopic/${data.next_subtopic.id}`);
-      } else {
+      } else if (!data.next_subtopic) {
         navigate("/student/progress");
       }
       load();
@@ -308,9 +308,9 @@ export default function SubtopicView() {
           toast.success("All tests passed! Moving to next topic 🚀");
         }
         setTimeout(() => {
-          if (data?.next_subtopic) {
+          if (data?.next_subtopic && !data?.next_topic_locked) {
             navigate(`/subtopic/${data.next_subtopic.id}`);
-          } else {
+          } else if (!data?.next_subtopic) {
             navigate("/progress");
           }
         }, 1800);
@@ -373,7 +373,7 @@ export default function SubtopicView() {
     );
   }
 
-  const { subtopic, course, module, topic, task, submission, next_subtopic, prev_subtopic, total_subtopics, subtopic_index } = data;
+  const { subtopic, course, module, topic, task, submission, next_subtopic, prev_subtopic, total_subtopics, subtopic_index, next_topic_locked, next_topic_lock_reason } = data;
   
   // Handle content from either 'content' or 'content_html'
   const rawContent = subtopic.content || subtopic.content_html || "";
@@ -390,6 +390,27 @@ export default function SubtopicView() {
   const sidebarFrontierIdx = isStudent
     ? allFlatSubtopics.findIndex(s => !s.completed)
     : -1;
+
+  // Compute set of topic IDs at and after the mentor-locked boundary
+  const mentorLockedTopicId = (next_topic_locked && next_subtopic)
+    ? (() => {
+        for (const m of (course?.modules || []))
+          for (const t of (m.topics || []))
+            if ((t.subtopics || []).some(s => s.id === next_subtopic.id)) return t.id;
+        return null;
+      })()
+    : null;
+  const topicsAfterMentorLock = (() => {
+    if (!mentorLockedTopicId) return new Set();
+    const result = new Set();
+    let found = false;
+    for (const m of (course?.modules || []))
+      for (const t of (m.topics || [])) {
+        if (t.id === mentorLockedTopicId) found = true;
+        if (found) result.add(t.id);
+      }
+    return result;
+  })();
 
   const getEmbedUrl = (url) => {
     if (!url) return "";
@@ -471,7 +492,10 @@ export default function SubtopicView() {
                                   const globalIdx = allFlatSubtopics.findIndex(x => x.id === s.id);
                                   const isCurrent = s.id === id;
                                   const isSubCompleted = !!s.completed;
-                                  const isLocked = isStudent && !isSubCompleted && sidebarFrontierIdx !== -1 && globalIdx > sidebarFrontierIdx;
+                                  const isLocked = isStudent && !isSubCompleted && (
+                                    (s.id === next_subtopic?.id && next_topic_locked) ||
+                                    (sidebarFrontierIdx !== -1 && globalIdx > sidebarFrontierIdx)
+                                  );
 
                                   const pill = (
                                     <Link
@@ -525,7 +549,9 @@ export default function SubtopicView() {
                                         </TooltipTrigger>
                                         <TooltipContent side="right" className="bg-slate-900 text-white border-none rounded-sm text-[10px] font-bold p-3 shadow-xl flex items-center gap-2 animate-in zoom-in-95">
                                           <Lock className="h-3 w-3" />
-                                          Complete "{si > 0 ? topicSubs[si - 1].title : 'previous topic'}" to unlock
+                                          {s.id === next_subtopic?.id && next_topic_locked
+                                            ? "Your mentor hasn't unlocked this topic yet"
+                                            : `Complete "${si > 0 ? topicSubs[si - 1].title : 'previous topic'}" to unlock`}
                                         </TooltipContent>
                                       </Tooltip>
                                     </TooltipProvider>
@@ -576,7 +602,7 @@ export default function SubtopicView() {
             )}
           </div>
 
-          {subtopic.video_url && (
+          {subtopic.video_url ? (
             <Dialog>
               <DialogTrigger asChild>
                 <Button size="sm" className="bg-[#194BFB] hover:bg-[#0F3AE5] text-white rounded-sm h-8 px-3 font-bold text-[10px] uppercase tracking-widest gap-2 shrink-0">
@@ -604,6 +630,25 @@ export default function SubtopicView() {
                 </div>
               </DialogContent>
             </Dialog>
+          ) : (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="shrink-0">
+                    <Button size="sm" disabled className="rounded-sm h-8 px-3 font-bold text-[10px] uppercase tracking-widest gap-2 pointer-events-none">
+                      <div className="h-4 w-4 rounded-full bg-current/20 flex items-center justify-center">
+                        <Video className="h-2.5 w-2.5" />
+                      </div>
+                      Recordings
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="bg-slate-900 text-white border-none rounded-sm text-[10px] font-bold p-3 shadow-xl flex items-center gap-2">
+                  <Video className="h-3 w-3" />
+                  No recorded session for this topic yet
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           )}
         </div>
         <h1 className="text-3xl font-extrabold tracking-tight text-[#0A0A0A] font-['Outfit'] mb-4">
@@ -1042,9 +1087,29 @@ export default function SubtopicView() {
                 </Link>
               </Button>
             ) : (
-              <Button onClick={handleComplete} disabled={busy} className="bg-emerald-500 hover:bg-emerald-600 text-white rounded-sm h-10 px-6 font-bold uppercase tracking-wider">
-                {busy ? "..." : (next_subtopic ? "Next Subtopic" : "Finish Course")}
-              </Button>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div className="inline-block">
+                      <Button
+                        onClick={handleComplete}
+                        disabled={busy || (isCompleted && next_topic_locked && user?.role !== 'mentor')}
+                        className={`bg-emerald-500 hover:bg-emerald-600 text-white rounded-sm h-10 px-6 font-bold uppercase tracking-wider ${(isCompleted && next_topic_locked && user?.role !== 'mentor') ? 'opacity-50 pointer-events-none' : ''}`}
+                      >
+                        {busy ? "..." : (next_subtopic ? "Next Subtopic" : "Finish Course")}
+                      </Button>
+                    </div>
+                  </TooltipTrigger>
+                  {isCompleted && next_topic_locked && user?.role !== 'mentor' && (
+                    <TooltipContent className="bg-red-500 text-white border-none rounded-sm text-[10px] font-bold p-3 shadow-xl shadow-red-100 flex items-center gap-2 animate-in zoom-in-95">
+                      <Lock className="h-3 w-3" />
+                      {next_topic_lock_reason === 'mentor_locked'
+                        ? "Your mentor hasn't unlocked the next topic yet"
+                        : 'Complete all required subtopics in this topic first'}
+                    </TooltipContent>
+                  )}
+                </Tooltip>
+              </TooltipProvider>
             )
           ) : (
             next_subtopic ? (
@@ -1054,19 +1119,23 @@ export default function SubtopicView() {
                     <div className="inline-block relative">
                       <Button
                         onClick={() => navigate(`/subtopic/${next_subtopic.id}`)}
-                        disabled={(!isCompleted && user?.role !== 'mentor') || busy}
-                        className={`bg-[#194BFB] hover:bg-[#0F3AE5] text-white rounded-sm h-11 px-8 text-xs font-bold uppercase tracking-widest shadow-lg shadow-blue-100 ${((!isCompleted && user?.role !== 'mentor') || busy) ? 'pointer-events-none' : ''}`}
+                        disabled={(!isCompleted && user?.role !== 'mentor') || (next_topic_locked && user?.role !== 'mentor') || busy}
+                        className={`bg-[#194BFB] hover:bg-[#0F3AE5] text-white rounded-sm h-11 px-8 text-xs font-bold uppercase tracking-widest shadow-lg shadow-blue-100 ${((!isCompleted && user?.role !== 'mentor') || (next_topic_locked && user?.role !== 'mentor') || busy) ? 'pointer-events-none opacity-50' : ''}`}
                       >
-                        {busy ? "..." : (next_subtopic ? "Next Subtopic" : "Finish Course")} <ArrowRight className="ml-2 h-4 w-4" />
+                        {busy ? "..." : "Next Subtopic"} <ArrowRight className="ml-2 h-4 w-4" />
                       </Button>
                     </div>
                   </TooltipTrigger>
-                  {(!isCompleted && user?.role !== 'mentor') && (
+                  {user?.role !== 'mentor' && (!isCompleted || next_topic_locked) && (
                     <TooltipContent className="bg-red-500 text-white border-none rounded-sm text-[10px] font-bold p-3 shadow-xl shadow-red-100 flex items-center gap-2 animate-in zoom-in-95">
                       <Lock className="h-3 w-3" />
-                      {task?.task_type === 'coding'
-                        ? 'Pass all test cases to unlock next subtopic'
-                        : 'Submit your assignment to proceed to next subtopic'}
+                      {next_topic_locked
+                        ? (next_topic_lock_reason === 'mentor_locked'
+                            ? 'Your mentor hasn\'t unlocked the next topic yet'
+                            : 'Complete all required subtopics in this topic first')
+                        : task?.task_type === 'coding'
+                          ? 'Pass all test cases to unlock next subtopic'
+                          : 'Submit your assignment to proceed to next subtopic'}
                     </TooltipContent>
                   )}
                 </Tooltip>

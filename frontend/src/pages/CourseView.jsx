@@ -222,9 +222,11 @@ export default function CourseView() {
                                     <div className="space-y-1">
                                       <div className="text-[10px] font-black tracking-[0.2em] uppercase opacity-80">Locked</div>
                                       <div className="text-[11px] font-bold">
-                                        {isTierLocked 
-                                          ? "Upgrade your tier to unlock this module." 
-                                          : "Complete the previous topic to unlock this one."}
+                                        {isTierLocked
+                                          ? "Upgrade your tier to unlock this module."
+                                          : t.mentor_locked
+                                            ? "Your mentor hasn't unlocked this topic yet."
+                                            : "Complete the previous topic to unlock this one."}
                                       </div>
                                     </div>
                                   </TooltipContent>

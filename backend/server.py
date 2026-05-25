@@ -1061,6 +1061,7 @@ async def delete_module_admin(module_id: str, _: dict = Depends(require_roles("a
     topics = supabase.table("topics").select("id").eq("module_id", module_id).execute().data
     if topics:
         raise HTTPException(400, "Delete all topics in this module first.")
+    supabase.table("batch_module_access").delete().eq("module_id", module_id).execute()
     supabase.table("modules").delete().eq("id", module_id).execute()
     return {"ok": True}
 
@@ -1102,6 +1103,7 @@ async def delete_topic_admin(topic_id: str, _: dict = Depends(require_roles("adm
     subtopics = supabase.table("subtopics").select("id").eq("topic_id", topic_id).execute().data
     if subtopics:
         raise HTTPException(400, "Delete all subtopics in this topic first.")
+    supabase.table("batch_topic_access").delete().eq("topic_id", topic_id).execute()
     supabase.table("topics").delete().eq("id", topic_id).execute()
     return {"ok": True}
 
@@ -1292,9 +1294,10 @@ async def get_subtopic(subtopic_id: str, user: dict = Depends(require_active_acc
     last_code_submission = None
 
     if user["role"] == "student" and topic_raw.get("id"):
-        # Check unlock status directly
-        unlocked = await is_topic_unlocked(user["id"], topic_raw["id"])
+        unlocked, lock_reason = await is_topic_unlocked(user["id"], topic_raw["id"], user.get("batch_id"))
         if not unlocked:
+            if lock_reason == "mentor_locked":
+                raise HTTPException(status_code=403, detail={"code": "MENTOR_LOCKED", "message": "This topic hasn't been unlocked by your mentor yet."})
             raise HTTPException(status_code=403, detail="Topic is locked. Complete previous topics first.")
 
         if task:
@@ -1332,6 +1335,27 @@ async def get_subtopic(subtopic_id: str, user: dict = Depends(require_active_acc
             if i < len(all_subtopics) - 1: next_sub = all_subtopics[i+1]
             break
 
+    # Check if the next subtopic crosses a topic boundary and that topic is locked
+    next_topic_locked = False
+    next_topic_lock_reason = None
+    if user["role"] == "student" and next_sub:
+        next_sub_topic_id = None
+        for m in (course_data.get("modules") or []):
+            for t in m.get("topics", []):
+                for s in t.get("subtopics", []):
+                    if s["id"] == next_sub["id"]:
+                        next_sub_topic_id = t["id"]
+                        break
+                if next_sub_topic_id:
+                    break
+            if next_sub_topic_id:
+                break
+        if next_sub_topic_id and next_sub_topic_id != topic_raw.get("id"):
+            is_unl, reason = await is_topic_unlocked(user["id"], next_sub_topic_id, user.get("batch_id"))
+            if not is_unl:
+                next_topic_locked = True
+                next_topic_lock_reason = reason
+
     return {
         "subtopic": subtopic,
         "course": course_data,
@@ -1345,7 +1369,9 @@ async def get_subtopic(subtopic_id: str, user: dict = Depends(require_active_acc
         "total_subtopics": len(all_subtopics),
         "subtopic_index": subtopic_index,
         "is_completed": is_completed,
-        "completed_at": completed_at
+        "completed_at": completed_at,
+        "next_topic_locked": next_topic_locked,
+        "next_topic_lock_reason": next_topic_lock_reason,
     }
 
 # -------------------- Tasks --------------------
@@ -1629,47 +1655,54 @@ async def get_ordered_topics(course_id: str) -> list:
     return ordered
 
 
-async def is_topic_unlocked(student_id: str, topic_id: str) -> bool:
-    """Topic N+1 unlocks only when Topic N is complete."""
+async def is_topic_unlocked(student_id: str, topic_id: str, batch_id: str = None) -> tuple:
+    """Returns (is_unlocked, lock_reason) where lock_reason is None, 'seq_locked', or 'mentor_locked'."""
     topic = get_single_or_none(supabase.table("topics").select("*").eq("id", topic_id))
     if not topic:
-        return False
+        return (False, "seq_locked")
     module = get_single_or_none(supabase.table("modules").select("*").eq("id", topic["module_id"]))
     if not module:
-        return False
+        return (False, "seq_locked")
     ordered = await get_ordered_topics(module["course_id"])
     idx = next((i for i, t in enumerate(ordered) if t["id"] == topic_id), -1)
     if idx <= 0:
-        return True
-    
+        return (True, None)
+
     prev_topic = ordered[idx - 1]
-    
-    # Check if prev_topic is complete
-    # A Topic is complete if all its mandatory subtopics are finished in student_progress
+
+    # Check sequential gate: all mandatory subtopics of the previous topic must be complete
     mandatory_subtopics = supabase.table("subtopics")\
         .select("id")\
         .eq("topic_id", prev_topic["id"])\
         .eq("is_mandatory", True)\
         .execute().data or []
-    
-    if not mandatory_subtopics:
-        # Fallback: if no mandatory subtopics, check if Topic was marked complete manually (legacy)
-        legacy_progress = get_single_or_none(supabase.table("student_progress").select("*").eq("student_id", student_id).eq("topic_id", prev_topic["id"]).eq("is_completed", True))
-        return legacy_progress is not None
 
-    mandatory_ids = [s["id"] for s in mandatory_subtopics]
-    
-    # Check progress for these mandatory IDs
-    completed_subtopics = supabase.table("student_progress")\
-        .select("subtopic_id")\
-        .eq("student_id", student_id)\
-        .in_("subtopic_id", mandatory_ids)\
-        .eq("is_completed", True)\
-        .execute().data or []
-    
-    completed_ids = {c["subtopic_id"] for c in completed_subtopics}
-    
-    return all(mid in completed_ids for mid in mandatory_ids)
+    if not mandatory_subtopics:
+        legacy_progress = get_single_or_none(supabase.table("student_progress").select("*").eq("student_id", student_id).eq("topic_id", prev_topic["id"]).eq("is_completed", True))
+        seq_unlocked = legacy_progress is not None
+    else:
+        mandatory_ids = [s["id"] for s in mandatory_subtopics]
+        completed_subtopics = supabase.table("student_progress")\
+            .select("subtopic_id")\
+            .eq("student_id", student_id)\
+            .in_("subtopic_id", mandatory_ids)\
+            .eq("is_completed", True)\
+            .execute().data or []
+        completed_ids = {c["subtopic_id"] for c in completed_subtopics}
+        seq_unlocked = all(mid in completed_ids for mid in mandatory_ids)
+
+    if not seq_unlocked:
+        return (False, "seq_locked")
+
+    # Check mentor gate: topic must be explicitly unlocked by mentor for this batch
+    if batch_id:
+        mentor_row = get_single_or_none(
+            supabase.table("batch_topic_access").select("id").eq("batch_id", batch_id).eq("topic_id", topic_id)
+        )
+        if not mentor_row:
+            return (False, "mentor_locked")
+
+    return (True, None)
 
 
 # -------------------- Submissions --------------------
@@ -2568,6 +2601,45 @@ async def get_batch_topics(batch_id: str, user: dict = Depends(require_roles("me
     # Ordered by module sequence_order ASC, then topic sequence_order ASC
     topics.sort(key=lambda t: (mods_by_id.get(t["module_id"], {}).get("sequence_order") or 0, t.get("sequence_order") or 0))
     return topics
+
+
+@api.get("/batches/{batch_id}/topics/access")
+async def get_batch_topic_access(batch_id: str, user: dict = Depends(require_roles("mentor", "admin"))):
+    """Return list of topic_ids that the mentor has unlocked for this batch."""
+    if user["role"] == "mentor":
+        batch = get_single_or_none(supabase.table("batches").select("mentor_id").eq("id", batch_id))
+        if not batch or batch["mentor_id"] != user["id"]:
+            raise HTTPException(403, "Not your batch")
+    rows = supabase.table("batch_topic_access").select("topic_id, unlocked_at").eq("batch_id", batch_id).execute().data or []
+    return [r["topic_id"] for r in rows]
+
+
+@api.post("/batches/{batch_id}/topics/{topic_id}/unlock")
+async def unlock_topic_for_batch(batch_id: str, topic_id: str, user: dict = Depends(require_roles("mentor", "admin"))):
+    """Mentor unlocks a topic for all students in this batch."""
+    if user["role"] == "mentor":
+        batch = get_single_or_none(supabase.table("batches").select("mentor_id").eq("id", batch_id))
+        if not batch or batch["mentor_id"] != user["id"]:
+            raise HTTPException(403, "Not your batch")
+    topic = get_single_or_none(supabase.table("topics").select("id").eq("id", topic_id))
+    if not topic:
+        raise HTTPException(404, "Topic not found")
+    supabase.table("batch_topic_access").upsert(
+        {"batch_id": batch_id, "topic_id": topic_id, "unlocked_by": user["id"]},
+        on_conflict="batch_id,topic_id"
+    ).execute()
+    return {"ok": True}
+
+
+@api.delete("/batches/{batch_id}/topics/{topic_id}/unlock")
+async def lock_topic_for_batch(batch_id: str, topic_id: str, user: dict = Depends(require_roles("mentor", "admin"))):
+    """Re-lock a topic for all students in this batch."""
+    if user["role"] == "mentor":
+        batch = get_single_or_none(supabase.table("batches").select("mentor_id").eq("id", batch_id))
+        if not batch or batch["mentor_id"] != user["id"]:
+            raise HTTPException(403, "Not your batch")
+    supabase.table("batch_topic_access").delete().eq("batch_id", batch_id).eq("topic_id", topic_id).execute()
+    return {"ok": True}
 
 
 @api.get("/batches/sessions")
@@ -5146,19 +5218,32 @@ async def get_course(course_id: str, user: dict = Depends(require_active_access)
         ordered_topics.extend(m["topics"])
 
     if user["role"] == "student":
+        # Fetch which topics the mentor has unlocked for this student's batch
+        mentor_unlocked_ids = set()
+        student_batch_id = user.get("batch_id")
+        if student_batch_id:
+            access_res = supabase.table("batch_topic_access").select("topic_id").eq("batch_id", student_batch_id).execute().data or []
+            mentor_unlocked_ids = {r["topic_id"] for r in access_res}
+
         for i, t in enumerate(ordered_topics):
             # 1. Topic unlocking logic
             if i == 0:
                 t["unlocked"] = True
+                t["mentor_locked"] = False
             else:
+                # Check mentor gate
+                mentor_unlocked = t["id"] in mentor_unlocked_ids
+                t["mentor_locked"] = not mentor_unlocked
+
                 prev_t = ordered_topics[i-1]
                 # A topic N+1 is unlocked only if all MANDATORY subtopics in topic N are completed
                 mandatory_prev_subs = [s for s in prev_t.get("subtopics", []) if s.get("is_mandatory", True) is not False]
                 if mandatory_prev_subs:
-                    t["unlocked"] = all(s.get("completed", False) for s in mandatory_prev_subs)
+                    seq_unlocked = all(s.get("completed", False) for s in mandatory_prev_subs)
                 else:
                     # Fallback if no mandatory subtopics exist: check if all are completed or if it's empty
-                    t["unlocked"] = all(s.get("completed", False) for s in prev_t.get("subtopics", []))
+                    seq_unlocked = all(s.get("completed", False) for s in prev_t.get("subtopics", []))
+                t["unlocked"] = mentor_unlocked and seq_unlocked
             
             # 2. Subtopic unlocking logic (Sequential within the topic)
             subs = t.get("subtopics", [])
