@@ -26,7 +26,8 @@ import { toast } from "sonner";
 import LiveClassManagement from "../components/LiveClassManagement";
 import MentorRecordings from "../components/mentor/MentorRecordings";
 import MentorProgress from "../components/mentor/MentorProgress";
-import { BarChart2 } from "lucide-react";
+import BatchTopicAccess from "../components/mentor/BatchTopicAccess";
+import { BarChart2, KeySquare } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { fmtDateTime } from "../lib/dateUtils";
 
@@ -157,6 +158,9 @@ export default function MentorDashboard() {
             <button onClick={() => setActiveTab("progress")} className={`px-4 py-1.5 text-xs font-bold rounded transition-all flex items-center gap-2 ${activeTab === 'progress' ? "bg-white text-slate-900 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-700"}`}>
               <BarChart2 className="h-3 w-3" /> Progress
             </button>
+            <button onClick={() => setActiveTab("access")} className={`px-4 py-1.5 text-xs font-bold rounded transition-all flex items-center gap-2 ${activeTab === 'access' ? "bg-white text-slate-900 shadow-sm border border-slate-200" : "text-slate-500 hover:text-slate-700"}`}>
+              <KeySquare className="h-3 w-3" /> Access
+            </button>
           </div>
         </div>
 
@@ -265,9 +269,13 @@ export default function MentorDashboard() {
           <div className="mt-8">
             <MentorRecordings />
           </div>
-        ) : (
+        ) : activeTab === "progress" ? (
           <div className="mt-8">
             <MentorProgress batches={batches} />
+          </div>
+        ) : (
+          <div className="mt-8">
+            <BatchTopicAccess batches={batches} />
           </div>
         )}
       </div>

@@ -35,6 +35,9 @@ export function AuthProvider({ children }) {
       queryClient.clear();
       tokenStore.set(data.token);
       setUser(data.user);
+      // A logged-in user is already registered — discard any referral code
+      // left in localStorage from a previous browser session or referral link visit
+      localStorage.removeItem("hk_ref");
       return { ok: true, user: data.user };
     } catch (e) {
       return { ok: false, error: formatApiError(e.response?.data?.detail) || e.message };
@@ -55,6 +58,7 @@ export function AuthProvider({ children }) {
     try { await api.post("/auth/logout"); } catch {}
     queryClient.clear();
     tokenStore.clear();
+    localStorage.removeItem("hk_ref");
     setUser(null);
   };
 

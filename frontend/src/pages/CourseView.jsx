@@ -65,6 +65,7 @@ export default function CourseView() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'modules', filter: `course_id=eq.${id}` }, invalidate)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'topics' }, invalidate)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'subtopics' }, invalidate)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'batch_topic_access' }, invalidate)
       .subscribe();
     return () => supabase.removeChannel(channel);
   }, [id, queryClient]);
@@ -222,9 +223,11 @@ export default function CourseView() {
                                     <div className="space-y-1">
                                       <div className="text-[10px] font-black tracking-[0.2em] uppercase opacity-80">Locked</div>
                                       <div className="text-[11px] font-bold">
-                                        {isTierLocked 
-                                          ? "Upgrade your tier to unlock this module." 
-                                          : "Complete the previous topic to unlock this one."}
+                                        {isTierLocked
+                                          ? "Upgrade your tier to unlock this module."
+                                          : t.mentor_locked
+                                            ? "Your mentor hasn't unlocked this topic yet."
+                                            : "Complete the previous topic to unlock this one."}
                                       </div>
                                     </div>
                                   </TooltipContent>
