@@ -77,6 +77,16 @@ export default function SubtopicView() {
       : []
   );
 
+  // Set of topic IDs whose module is tier-locked (demo/expired tier, not granted access)
+  const tierLockedTopicIds = new Set(
+    user?.role === "student" && fullCourse
+      ? (fullCourse.modules || [])
+          .flatMap(m => m.topics || [])
+          .filter(t => t.tier_locked)
+          .map(t => t.id)
+      : []
+  );
+
   const load = async () => {
     setError("");
     try {
@@ -512,12 +522,10 @@ export default function SubtopicView() {
                                   const globalIdx = allFlatSubtopics.findIndex(x => x.id === s.id);
                                   const isCurrent = s.id === id;
                                   const isSubCompleted = !!s.completed;
-                                  // A subtopic is locked if:
-                                  // 1. Its topic is mentor-locked (even if previously completed — mentor re-locked it)
-                                  // 2. It's not completed AND is beyond the sequential completion frontier
-                                  // 3. It's the immediate next subtopic and its topic boundary is locked
-                                  const isTopicMentorLocked = mentorLockedTopicIds.has(t.id);
+                                  const isTopicTierLocked = tierLockedTopicIds.has(t.id);
+                                  const isTopicMentorLocked = !isTopicTierLocked && mentorLockedTopicIds.has(t.id);
                                   const isLocked = isStudent && (
+                                    isTopicTierLocked ||
                                     isTopicMentorLocked ||
                                     (!isSubCompleted && (
                                       (s.id === next_subtopic?.id && next_topic_locked) ||
@@ -577,9 +585,11 @@ export default function SubtopicView() {
                                         </TooltipTrigger>
                                         <TooltipContent side="right" className="bg-slate-900 text-white border-none rounded-sm text-[10px] font-bold p-3 shadow-xl flex items-center gap-2 animate-in zoom-in-95">
                                           <Lock className="h-3 w-3" />
-                                          {isTopicMentorLocked || (s.id === next_subtopic?.id && next_topic_locked && next_topic_lock_reason === 'mentor_locked')
-                                            ? "Your mentor hasn't unlocked this topic yet"
-                                            : `Complete "${si > 0 ? topicSubs[si - 1].title : 'previous topic'}" to unlock`}
+                                          {isTopicTierLocked
+                                            ? "Upgrade your tier to unlock this module."
+                                            : isTopicMentorLocked || (s.id === next_subtopic?.id && next_topic_locked && next_topic_lock_reason === 'mentor_locked')
+                                              ? "Your mentor hasn't unlocked this topic yet"
+                                              : `Complete "${si > 0 ? topicSubs[si - 1].title : 'previous topic'}" to unlock`}
                                         </TooltipContent>
                                       </Tooltip>
                                     </TooltipProvider>

@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
 import {
   ChevronLeft,
+  ChevronDown,
   Settings,
   Plus,
   GripVertical,
@@ -65,6 +66,14 @@ export default function AdminCourseEditor() {
   const [newTitle, setNewTitle] = useState("");
   const [saving, setSaving] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+
+  // Collapse state: undefined/missing key = expanded (true)
+  const [openModules, setOpenModules] = useState({});
+  const [openTopics, setOpenTopics] = useState({});
+  const isModuleOpen = (id) => openModules[id] !== false;
+  const isTopicOpen = (id) => openTopics[id] !== false;
+  const toggleModule = (id) => setOpenModules(p => ({ ...p, [id]: !isModuleOpen(id) }));
+  const toggleTopic = (id) => setOpenTopics(p => ({ ...p, [id]: !isTopicOpen(id) }));
 
   // Fetch full course data
   const fetchData = useCallback(async () => {
@@ -395,6 +404,15 @@ export default function AdminCourseEditor() {
                                 <div {...provided.dragHandleProps} className="cursor-grab p-1 hover:bg-slate-200 rounded-sm text-slate-300 group-hover:text-slate-400 transition-colors shrink-0">
                                   <GripVertical className="h-3.5 w-3.5" />
                                 </div>
+                                <button
+                                  onClick={() => toggleModule(module.id)}
+                                  className="p-0.5 hover:bg-slate-200 rounded-sm text-slate-400 transition-colors shrink-0"
+                                  title={isModuleOpen(module.id) ? "Collapse module" : "Expand module"}
+                                >
+                                  {isModuleOpen(module.id)
+                                    ? <ChevronDown className="h-3.5 w-3.5" />
+                                    : <ChevronRight className="h-3.5 w-3.5" />}
+                                </button>
                                 <span className="block flex-1 min-w-0 text-[11px] font-extrabold text-slate-900 truncate tracking-widest uppercase" title={`Module ${mIndex + 1}: ${module.title}`}>
                                   Module {mIndex + 1}: {module.title}
                                 </span>
@@ -408,8 +426,8 @@ export default function AdminCourseEditor() {
                             {/* Topics Container */}
                             <Droppable droppableId={module.id} type="topic">
                               {(tProvided) => (
-                                <div {...tProvided.droppableProps} ref={tProvided.innerRef} className="p-2 space-y-4 min-h-[10px] bg-white w-full max-w-full">
-                                  {(module.topics || []).map((topic, tIndex) => (
+                                <div {...tProvided.droppableProps} ref={tProvided.innerRef} className={`p-2 space-y-4 bg-white w-full max-w-full ${isModuleOpen(module.id) ? 'min-h-[10px]' : 'min-h-0 hidden'}`}>
+                                  {isModuleOpen(module.id) && (module.topics || []).map((topic, tIndex) => (
                                     <Draggable key={topic.id} draggableId={topic.id} index={tIndex}>
                                       {(tDraggable) => (
                                         <div ref={tDraggable.innerRef} {...tDraggable.draggableProps} className="space-y-2 w-full max-w-full">
@@ -419,12 +437,21 @@ export default function AdminCourseEditor() {
                                               <div {...tDraggable.dragHandleProps} className="cursor-grab p-1 hover:bg-slate-200 rounded-sm text-slate-300 group-hover/topic:text-slate-400 transition-colors shrink-0">
                                                 <GripVertical className="h-3 w-3" />
                                               </div>
+                                              <button
+                                                onClick={() => toggleTopic(topic.id)}
+                                                className="p-0.5 hover:bg-slate-200 rounded-sm text-slate-400 transition-colors shrink-0"
+                                                title={isTopicOpen(topic.id) ? "Collapse topic" : "Expand topic"}
+                                              >
+                                                {isTopicOpen(topic.id)
+                                                  ? <ChevronDown className="h-3 w-3" />
+                                                  : <ChevronRight className="h-3 w-3" />}
+                                              </button>
                                               <span className="block flex-1 min-w-0 text-[11px] font-bold text-slate-600 truncate uppercase tracking-tight" title={`Topic: ${topic.title}`}>
                                                 Topic: {topic.title} {!topic.is_published && "(Hidden)"}
                                               </span>
                                             </div>
                                             <div className="flex items-center gap-1 transition-all shrink-0">
-                                              <button 
+                                              <button
                                                 onClick={() => updateTopicData(topic.id, { is_published: !topic.is_published })}
                                                 className={`p-1 rounded-sm transition-colors ${topic.is_published ? 'hover:bg-blue-50 text-blue-500' : 'hover:bg-slate-200 text-slate-400'}`}
                                                 title={topic.is_published ? "Unpublish Topic" : "Publish Topic"}
@@ -439,8 +466,8 @@ export default function AdminCourseEditor() {
                                           {/* Subtopics Container */}
                                           <Droppable droppableId={topic.id} type="subtopic">
                                             {(sProvided) => (
-                                              <div {...sProvided.droppableProps} ref={sProvided.innerRef} className="pl-4 space-y-1 min-h-[5px] w-full max-w-full">
-                                                {(topic.subtopics || []).map((subtopic, sIndex) => (
+                                              <div {...sProvided.droppableProps} ref={sProvided.innerRef} className={`pl-4 space-y-1 w-full max-w-full ${isTopicOpen(topic.id) ? 'min-h-[5px]' : 'min-h-0 hidden'}`}>
+                                                {isTopicOpen(topic.id) && (topic.subtopics || []).map((subtopic, sIndex) => (
                                                   <Draggable key={subtopic.id} draggableId={subtopic.id} index={sIndex}>
                                                     {(sDraggable) => (
                                                       <div
@@ -449,8 +476,8 @@ export default function AdminCourseEditor() {
                                                         {...sDraggable.dragHandleProps}
                                                         onClick={() => setSelectedSubtopic(subtopic)}
                                                         className={`p-2 rounded-sm text-[12px] font-medium flex items-center justify-between group/sub transition-all duration-200 gap-2 ${
-                                                          selectedSubtopic?.id === subtopic.id 
-                                                          ? 'bg-[#194BFB] text-white shadow-md ring-1 ring-blue-400' 
+                                                          selectedSubtopic?.id === subtopic.id
+                                                          ? 'bg-[#194BFB] text-white shadow-md ring-1 ring-blue-400'
                                                           : 'hover:bg-slate-50 text-slate-600 border border-transparent hover:border-slate-200'
                                                         }`}
                                                       >
@@ -458,7 +485,7 @@ export default function AdminCourseEditor() {
                                                           <FileText className={`h-3 w-3 shrink-0 ${selectedSubtopic?.id === subtopic.id ? 'text-blue-100' : 'text-slate-400'}`} />
                                                           <span className="block flex-1 min-w-0 truncate tracking-tight" title={subtopic.title}>{subtopic.title}</span>
                                                         </div>
-                                                        <button 
+                                                        <button
                                                           onClick={(e) => { e.stopPropagation(); setActiveSubtopicId(subtopic.id); setShowDeleteSubtopicModal(true); }}
                                                           className={`shrink-0 p-1 rounded-sm transition-all ${selectedSubtopic?.id === subtopic.id ? 'hover:bg-white/20 text-white' : 'hover:bg-red-50 text-red-400 opacity-50 group-hover/sub:opacity-100'}`}
                                                         >
