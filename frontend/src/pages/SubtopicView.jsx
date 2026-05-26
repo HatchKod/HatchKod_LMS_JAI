@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, formatApiError } from "../lib/api";
 import { fmtDate } from "../lib/dateUtils";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
@@ -52,6 +52,30 @@ export default function SubtopicView() {
   const [stdin, setStdin] = useState("");
   const [runOutput, setRunOutput] = useState(null); // { output, cpuTime, memory }
   const [runBusy, setRunBusy] = useState(false);
+
+  const courseId = data?.course?.id;
+
+  // Full course data — uses the same cache key as CourseView so it's free when navigating
+  // from the syllabus. Provides topic-level mentor_locked / subtopic-level unlocked flags.
+  const { data: fullCourse } = useQuery({
+    queryKey: ["course", courseId],
+    queryFn: async () => {
+      const res = await api.get(`/courses/${courseId}`);
+      return res.data;
+    },
+    enabled: !!courseId,
+    staleTime: 1000 * 60 * 5,
+  });
+
+  // Set of topic IDs that the mentor has locked for this student's batch
+  const mentorLockedTopicIds = new Set(
+    user?.role === "student" && fullCourse
+      ? (fullCourse.modules || [])
+          .flatMap(m => m.topics || [])
+          .filter(t => t.mentor_locked)
+          .map(t => t.id)
+      : []
+  );
 
   const load = async () => {
     setError("");
@@ -140,6 +164,22 @@ export default function SubtopicView() {
 
     return () => supabase.removeChannel(channel);
   }, [id]);
+
+  // When the mentor changes topic lock state, refresh both the course cache (sidebar) and
+  // the subtopic data (next_topic_locked drives the Next button disabled state).
+  const loadRef = useRef(null);
+  loadRef.current = load;
+
+  useEffect(() => {
+    if (!courseId) return;
+    const ch = supabase.channel(`subtopic_access_${courseId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'batch_topic_access' }, () => {
+        queryClient.invalidateQueries({ queryKey: ["course", courseId] });
+        loadRef.current?.();
+      })
+      .subscribe();
+    return () => supabase.removeChannel(ch);
+  }, [courseId, queryClient]);
 
   // Poll every 5s while submission is pending so the Next button unlocks
   // the moment a mentor approves — no page reload needed.
@@ -472,9 +512,17 @@ export default function SubtopicView() {
                                   const globalIdx = allFlatSubtopics.findIndex(x => x.id === s.id);
                                   const isCurrent = s.id === id;
                                   const isSubCompleted = !!s.completed;
-                                  const isLocked = isStudent && !isSubCompleted && (
-                                    (s.id === next_subtopic?.id && next_topic_locked) ||
-                                    (sidebarFrontierIdx !== -1 && globalIdx > sidebarFrontierIdx)
+                                  // A subtopic is locked if:
+                                  // 1. Its topic is mentor-locked (even if previously completed — mentor re-locked it)
+                                  // 2. It's not completed AND is beyond the sequential completion frontier
+                                  // 3. It's the immediate next subtopic and its topic boundary is locked
+                                  const isTopicMentorLocked = mentorLockedTopicIds.has(t.id);
+                                  const isLocked = isStudent && (
+                                    isTopicMentorLocked ||
+                                    (!isSubCompleted && (
+                                      (s.id === next_subtopic?.id && next_topic_locked) ||
+                                      (sidebarFrontierIdx !== -1 && globalIdx > sidebarFrontierIdx)
+                                    ))
                                   );
 
                                   const pill = (
@@ -529,7 +577,7 @@ export default function SubtopicView() {
                                         </TooltipTrigger>
                                         <TooltipContent side="right" className="bg-slate-900 text-white border-none rounded-sm text-[10px] font-bold p-3 shadow-xl flex items-center gap-2 animate-in zoom-in-95">
                                           <Lock className="h-3 w-3" />
-                                          {s.id === next_subtopic?.id && next_topic_locked
+                                          {isTopicMentorLocked || (s.id === next_subtopic?.id && next_topic_locked && next_topic_lock_reason === 'mentor_locked')
                                             ? "Your mentor hasn't unlocked this topic yet"
                                             : `Complete "${si > 0 ? topicSubs[si - 1].title : 'previous topic'}" to unlock`}
                                         </TooltipContent>

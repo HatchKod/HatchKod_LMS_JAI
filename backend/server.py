@@ -1293,8 +1293,17 @@ async def get_subtopic(subtopic_id: str, user: dict = Depends(require_active_acc
     submission = None
     last_code_submission = None
 
+    # Resolve course-matched batch once — shared by the access check and next_topic_locked check
+    course_batch_id = user.get("batch_id")
+    if user["role"] == "student" and course_id:
+        bs_res = supabase.table("batch_students").select("batch_id, batches(course_id)").eq("student_id", user["id"]).execute().data or []
+        for b in bs_res:
+            if b.get("batches", {}).get("course_id") == course_id:
+                course_batch_id = b["batch_id"]
+                break
+
     if user["role"] == "student" and topic_raw.get("id"):
-        unlocked, lock_reason = await is_topic_unlocked(user["id"], topic_raw["id"], user.get("batch_id"))
+        unlocked, lock_reason = await is_topic_unlocked(user["id"], topic_raw["id"], course_batch_id)
         if not unlocked:
             if lock_reason == "mentor_locked":
                 raise HTTPException(status_code=403, detail={"code": "MENTOR_LOCKED", "message": "This topic hasn't been unlocked by your mentor yet."})
@@ -1351,7 +1360,7 @@ async def get_subtopic(subtopic_id: str, user: dict = Depends(require_active_acc
             if next_sub_topic_id:
                 break
         if next_sub_topic_id and next_sub_topic_id != topic_raw.get("id"):
-            is_unl, reason = await is_topic_unlocked(user["id"], next_sub_topic_id, user.get("batch_id"))
+            is_unl, reason = await is_topic_unlocked(user["id"], next_sub_topic_id, course_batch_id)
             if not is_unl:
                 next_topic_locked = True
                 next_topic_lock_reason = reason
@@ -1605,54 +1614,14 @@ async def submit_code_task(subtopic_id: str, payload: CodeSubmitIn, user: dict =
 
 # -------------------- Lock/Unlock helper --------------------
 async def get_ordered_topics(course_id: str) -> list:
-    modules_all = supabase.table("modules").select("*").eq("course_id", course_id).order("sequence_order").execute().data
-    
-    # Deduplicate modules by title
-    from collections import OrderedDict
-    mods_by_title = OrderedDict()
-    all_module_ids_for_title = {}
-    for m in modules_all:
-        title = m.get("title", "").strip()
-        if title not in mods_by_title:
-            mods_by_title[title] = m
-            all_module_ids_for_title[title] = [m["id"]]
-        else:
-            all_module_ids_for_title[title].append(m["id"])
-            
-    all_module_ids = [mid for ids in all_module_ids_for_title.values() for mid in ids]
-    
-    if not all_module_ids:
+    modules_all = supabase.table("modules").select("id, sequence_order").eq("course_id", course_id).order("sequence_order").execute().data or []
+    module_ids = [m["id"] for m in modules_all]
+    if not module_ids:
         return []
-        
-    all_lessons_raw = supabase.table("topics").select("*").in_("module_id", all_module_ids).order("sequence_order").execute().data
-    
-    # Group and deduplicate lessons by title per canonical module
-    title_to_canonical_id = {m.get("title","").strip(): m["id"] for m in mods_by_title.values()}
-    id_to_title = {}
-    for title, ids in all_module_ids_for_title.items():
-        for mid in ids:
-            id_to_title[mid] = title
-            
-    lessons_by_module = {}
-    seen_lessons = {}
-    for l in all_lessons_raw:
-        mod_title = id_to_title.get(l["module_id"], "")
-        canonical_id = title_to_canonical_id.get(mod_title)
-        if canonical_id is None:
-            continue
-        if canonical_id not in lessons_by_module:
-            lessons_by_module[canonical_id] = []
-            seen_lessons[canonical_id] = set()
-        lesson_title = l.get("title", "").strip()
-        if lesson_title not in seen_lessons[canonical_id]:
-            seen_lessons[canonical_id].add(lesson_title)
-            lessons_by_module[canonical_id].append(l)
-            
-    ordered = []
-    for m in mods_by_title.values():
-        ordered.extend(lessons_by_module.get(m["id"], []))
-        
-    return ordered
+    all_topics = supabase.table("topics").select("*").in_("module_id", module_ids).execute().data or []
+    module_order = {m["id"]: (m.get("sequence_order") or 0) for m in modules_all}
+    all_topics.sort(key=lambda t: (module_order.get(t["module_id"], 0), t.get("sequence_order") or 0))
+    return all_topics
 
 
 async def is_topic_unlocked(student_id: str, topic_id: str, batch_id: str = None) -> tuple:
@@ -1665,7 +1634,9 @@ async def is_topic_unlocked(student_id: str, topic_id: str, batch_id: str = None
         return (False, "seq_locked")
     ordered = await get_ordered_topics(module["course_id"])
     idx = next((i for i, t in enumerate(ordered) if t["id"] == topic_id), -1)
-    if idx <= 0:
+    if idx == -1:
+        return (False, "seq_locked")
+    if idx == 0:
         return (True, None)
 
     prev_topic = ordered[idx - 1]
@@ -1747,7 +1718,7 @@ async def submit_task(subtopic_id: str, payload: SubmissionIn, user: dict = Depe
     # Check if subtopic is unlocked (using parent topic check)
     sub_res = supabase.table("subtopics").select("topic_id, topics(module_id)").eq("id", subtopic_id).single().execute()
     if not sub_res.data: raise HTTPException(404, "Subtopic not found")
-    
+
     # Enforce module-level payment check
     topic_data = sub_res.data.get("topics") or {}
     module_id = topic_data.get("module_id")
@@ -1758,7 +1729,20 @@ async def submit_task(subtopic_id: str, payload: SubmissionIn, user: dict = Depe
             if not has_access:
                 raise HTTPException(status_code=403, detail="Module access denied under current tier.")
 
-    if not await is_topic_unlocked(user["id"], sub_res.data["topic_id"]):
+    # Resolve the correct batch for this course before checking topic lock
+    submit_course_batch_id = user.get("batch_id")
+    if module_id:
+        mod_res = supabase.table("modules").select("course_id").eq("id", module_id).single().execute()
+        submit_course_id = (mod_res.data or {}).get("course_id")
+        if submit_course_id:
+            bs_res = supabase.table("batch_students").select("batch_id, batches(course_id)").eq("student_id", user["id"]).execute().data or []
+            for b in bs_res:
+                if b.get("batches", {}).get("course_id") == submit_course_id:
+                    submit_course_batch_id = b["batch_id"]
+                    break
+
+    _unlocked, _lock_reason = await is_topic_unlocked(user["id"], sub_res.data["topic_id"], submit_course_batch_id)
+    if not _unlocked:
         raise HTTPException(403, "Subtopic locked")
     if not (payload.submission_url or payload.submission_text):
         raise HTTPException(400, "Provide GitHub link or text")
@@ -5134,25 +5118,28 @@ async def get_course(course_id: str, user: dict = Depends(require_active_access)
     modules_res = supabase.table("modules").select("*").eq("course_id", course_id).execute()
     modules = modules_res.data or []
     
+    # Resolve the student's batch for this specific course once — used for both tier and mentor gates
+    course_batch_id = None
+    if user["role"] == "student":
+        batch_res = supabase.table("batch_students").select("batch_id, batches(course_id)").eq("student_id", user["id"]).execute().data or []
+        for b in batch_res:
+            if b.get("batches", {}).get("course_id") == course_id:
+                course_batch_id = b["batch_id"]
+                break
+        if not course_batch_id:
+            course_batch_id = user.get("batch_id")
+
     # Filter modules based on student's payment tier access configuration
     if user["role"] == "student":
         effective_tier = user.get("effective_tier", "demo")
         if effective_tier != "full":
-            batch_res = supabase.table("batch_students").select("batch_id, batches(course_id)").eq("student_id", user["id"]).execute().data or []
-            matching_batch_id = None
-            for b in batch_res:
-                if b.get("batches", {}).get("course_id") == course_id:
-                    matching_batch_id = b["batch_id"]
-                    break
-            
-            resolved_batch_id = matching_batch_id or user.get("batch_id")
-            if not resolved_batch_id:
+            if not course_batch_id:
                 for m in modules:
                     m["tier_locked"] = True
             else:
-                allowed_res = supabase.table("batch_module_access").select("module_id").eq("batch_id", resolved_batch_id).eq("tier", effective_tier).execute().data
+                allowed_res = supabase.table("batch_module_access").select("module_id").eq("batch_id", course_batch_id).eq("tier", effective_tier).execute().data
                 allowed_module_ids = {r["module_id"] for r in allowed_res} if allowed_res else set()
-                
+
                 for m in modules:
                     m["tier_locked"] = m["id"] not in allowed_module_ids
                 
@@ -5222,9 +5209,8 @@ async def get_course(course_id: str, user: dict = Depends(require_active_access)
     if user["role"] == "student":
         # Fetch which topics the mentor has unlocked for this student's batch
         mentor_unlocked_ids = set()
-        student_batch_id = user.get("batch_id")
-        if student_batch_id:
-            access_res = supabase.table("batch_topic_access").select("topic_id").eq("batch_id", student_batch_id).execute().data or []
+        if course_batch_id:
+            access_res = supabase.table("batch_topic_access").select("topic_id").eq("batch_id", course_batch_id).execute().data or []
             mentor_unlocked_ids = {r["topic_id"] for r in access_res}
 
         for i, t in enumerate(ordered_topics):
