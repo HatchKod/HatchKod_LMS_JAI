@@ -97,6 +97,8 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
 
 ONBOARDING_LAMBDA_URL = os.getenv("ONBOARDING_LAMBDA_URL", "https://9vsd5hlgu3.execute-api.ap-south-1.amazonaws.com/Dev/onboard_student")
 PRODUCTION_DOMAIN = os.getenv("PRODUCTION_DOMAIN", "https://hatchkod.in")
+# Set to "false" only in local HTTP dev; always True in production (HTTPS)
+COOKIE_SECURE = os.getenv("COOKIE_SECURE", "true").lower() == "true"
 JUDGE0_URL = os.getenv("JUDGE0_URL", "http://13.205.4.224:2358")
 JUDGE0_AUTH_TOKEN = os.getenv("JUDGE0_AUTH_TOKEN", "")
 
@@ -355,7 +357,7 @@ def set_auth_cookie(response: Response, token: str) -> None:
         key="access_token",
         value=token,
         httponly=True,
-        secure=False,
+        secure=COOKIE_SECURE,
         samesite="lax",
         max_age=ACCESS_TOKEN_MIN * 60,
         path="/",
@@ -795,7 +797,7 @@ async def login(payload: LoginIn, response: Response):
 
 @api.post("/auth/logout")
 async def logout(response: Response):
-    response.delete_cookie("access_token", path="/")
+    response.delete_cookie("access_token", path="/", httponly=True, samesite="lax", secure=COOKIE_SECURE)
     return {"ok": True}
 
 

@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
-import { api, tokenStore, formatApiError } from "./api";
+import { api, formatApiError } from "./api";
 import { queryClient } from "./queryClient";
 
 const AuthContext = createContext(null);
@@ -9,16 +9,10 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   const loadMe = useCallback(async () => {
-    if (!tokenStore.get()) {
-      setUser(null);
-      setLoading(false);
-      return;
-    }
     try {
       const { data } = await api.get("/auth/me");
       setUser(data);
     } catch {
-      tokenStore.clear();
       setUser(null);
     } finally {
       setLoading(false);
@@ -33,7 +27,6 @@ export function AuthProvider({ children }) {
     try {
       const { data } = await api.post("/auth/login", { email, password });
       queryClient.clear();
-      tokenStore.set(data.token);
       setUser(data.user);
       // A logged-in user is already registered — discard any referral code
       // left in localStorage from a previous browser session or referral link visit
@@ -57,7 +50,6 @@ export function AuthProvider({ children }) {
   const logout = async () => {
     try { await api.post("/auth/logout"); } catch {}
     queryClient.clear();
-    tokenStore.clear();
     localStorage.removeItem("hk_ref");
     setUser(null);
   };

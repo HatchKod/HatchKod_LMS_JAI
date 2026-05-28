@@ -3,23 +3,9 @@ import axios from "axios";
 const BACKEND_URL = process.env.REACT_APP_API_URL || "http://localhost:8000";
 export const API = `${BACKEND_URL}/api`;
 
-const TOKEN_KEY = "hk_token";
-
-export const tokenStore = {
-  get: () => localStorage.getItem(TOKEN_KEY),
-  set: (t) => localStorage.setItem(TOKEN_KEY, t),
-  clear: () => localStorage.removeItem(TOKEN_KEY),
-};
-
-export const api = axios.create({ baseURL: API });
-
-api.interceptors.request.use((config) => {
-  const token = tokenStore.get();
-  if (token) {
-    config.headers = config.headers || {};
-    config.headers["Authorization"] = `Bearer ${token}`;
-  }
-  return config;
+export const api = axios.create({
+  baseURL: API,
+  withCredentials: true,
 });
 
 api.upload = (url, file) => {
